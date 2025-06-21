@@ -1,0 +1,21 @@
+﻿<Window x:Class="CourseWork.SplashScreenWindow" 
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" 
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" 
+        xmlns:options="http://schemas.microsoft.com/winfx/2006/xaml/presentation/options"  
+        Title="Завантаження..." Height="770" Width="1200" 
+        WindowStyle="None" 
+        ResizeMode="NoResize" 
+        WindowStartupLocation="CenterScreen" 
+        AllowsTransparency="True" 
+        Background="Transparent" 
+        ShowInTaskbar="False" 
+        Loaded="Window_Loaded">
+    <Border Background="White" BorderBrush="Gray" Margin="0,0,0,0">
+        <Grid>
+            <!-- Переконайтеся, що SplashScreen.jpg додано до проекту як Resource -->
+            <Image Source="pack://application:,,,/SplashScreen.jpg" Stretch="Uniform">
+
+            </Image>
+        </Grid>
+    </Border>
+</Window>

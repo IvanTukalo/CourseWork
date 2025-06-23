@@ -4,15 +4,15 @@
 winexe
 C#
 .cs
-C:\Users\Laplace\Source\Repos\CourseWork\obj\Debug\
+C:\Users\Laplace\Source\Repos\CourseWork\obj\Release\
 CourseWork
 none
 false
-DEBUG;TRACE
+TRACE
 C:\Users\Laplace\Source\Repos\CourseWork\App.xaml
 4-92280294
 
-9-502898555
+81870290620
 13-38814620
 InputDialog.xaml;LogWindow.xaml;MainWindow.xaml;SplashScreenWindow.xaml;
 

@@ -69,7 +69,6 @@ namespace CourseWork
             // Навіть якщо він викличе подію, DevicesOnPlan вже не буде null.
             InitializeComponent();
 
-            // 3. Виконуємо решту налаштувань
             InitializeSimulation();
             InitializeDevicesAndRooms();
             UpdateDeviceFilters();

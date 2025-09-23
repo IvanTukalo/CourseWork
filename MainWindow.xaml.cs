@@ -98,6 +98,7 @@ namespace CourseWork
             var livingRoom = new Room("Вітальня", new Rect(210, 140, 150, 170), this) { DefaultTemperature = 23, DefaultHumidity = 45 };
             var kitchen = new Room("Кухня", new Rect(370, 10, 120, 150), this) { DefaultTemperature = 21, DefaultHumidity = 55 };
             var bathroom = new Room("Ванна", new Rect(370, 170, 120, 100), this) { DefaultTemperature = 24, DefaultHumidity = 60 };
+            
             _allRooms.AddRange(new[] { porch, tambour, hall, bedroom1, bedroom2, livingRoom, kitchen, bathroom });
 
             foreach (var room in _allRooms)

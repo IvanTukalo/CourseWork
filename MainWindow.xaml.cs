@@ -20,7 +20,9 @@ namespace CourseWork
 {
     public partial class MainWindow : Window, INotifyPropertyChanged
     {
-        public const double SIMULATION_SPEED_FACTOR = 1.0 / 6.0;
+        // Simulation scaling: with UPDATE_INTERVAL_SECONDS = 0.5s and SIMULATION_SPEED_FACTOR = 0.1,
+        // each tick advances 0.5s * 60 * 0.1 = 3 simulated minutes => 6 simulated minutes per real second.
+        public const double SIMULATION_SPEED_FACTOR = 0.1;
         public const double UPDATE_INTERVAL_SECONDS = 0.5;
 
         private DispatcherTimer _simulationTimer;
@@ -39,6 +41,13 @@ namespace CourseWork
             set { _isElectricityOn = value; OnPropertyChanged(); LogEvent($"Електроенергію {(value ? "увімкнено" : "вимкнено")}"); UpdateAllDeviceStatesAfterPowerChange(); }
         }
 
+        // New: Pause/Resume simulation state
+        private bool _isSimulationPaused = false;
+        public bool IsSimulationPaused
+        {
+            get => _isSimulationPaused;
+            set { if (_isSimulationPaused != value) { _isSimulationPaused = value; OnPropertyChanged(); } }
+        }
         private ToolType _selectedTool = ToolType.None;
         private Button _selectedToolButton = null;
 
@@ -87,18 +96,65 @@ namespace CourseWork
             _allDevices = new List<SmartDeviceBase>();
             _allRooms = new List<Room>();
 
-            // Створення кімнат (координати та розміри - приклади, налаштуйте під ваш HousePlan.jpg)
-            // Кожна кімната отримує посилання на MainWindow для доступу до глобальних параметрів симуляції, якщо потрібно
-            var porch = new Room("Крильце", new Rect(10, 10, 100, 80), this) { DefaultTemperature = 18, DefaultHumidity = 50 };
-            var tambour = new Room("Тамбур", new Rect(120, 10, 80, 80), this) { DefaultTemperature = 20, DefaultHumidity = 50 };
-            var hall = new Room("Хол", new Rect(210, 10, 150, 120), this) { DefaultTemperature = 22, DefaultHumidity = 45 };
-            var bedroom1 = new Room("Спальня 1", new Rect(10, 100, 180, 100), this) { DefaultTemperature = 22, DefaultHumidity = 50 };
-            var bedroom2 = new Room("Спальня 2", new Rect(10, 210, 180, 100), this) { DefaultTemperature = 22, DefaultHumidity = 50 };
-            var livingRoom = new Room("Вітальня", new Rect(210, 140, 150, 170), this) { DefaultTemperature = 23, DefaultHumidity = 45 };
-            var kitchen = new Room("Кухня", new Rect(370, 10, 120, 150), this) { DefaultTemperature = 21, DefaultHumidity = 55 };
-            var bathroom = new Room("Ванна", new Rect(370, 170, 120, 100), this) { DefaultTemperature = 24, DefaultHumidity = 60 };
+            // Створення кімнат на основі розмірів зображення плану (1446x1688) з урахуванням відступів
+            // Це забезпечує збереження пропорцій та відповідності описаному макету:
+            // Row 1: "Вітальня" зліва (прибл. 1/3 висоти, 3/5 ширини), "Спальня 2" справа (залишок ширини, майже 1/2 висоти)
+            // Row 2: "Кухня" (квадрат) зліва під "Вітальня", правіше "Хол"; під "Спальня 2" розміщена "Спальня 1" (трохи менша за "Спальня 2")
+            // Row 3: "Ванна" зліва під "Кухня", "Тамбур" під "Хол", праворуч/внизу продовження зони для "Спальня 1"
+            // "Крильце" внизу по центру, вирівняне по центру з "Тамбур".
+            double IMG_W = 1446, IMG_H = 1688;
+            double padX = 0.15 * IMG_W;         // бічні відступи від країв зображення
+            double padTop = 0.14 * IMG_H;       // верхній відступ
+            double padBottom = 0.15 * IMG_H;    // нижній відступ
+            double innerW = IMG_W - 2 * padX;
+            double innerH = IMG_H - padTop - padBottom;
+            double gapX = 0.0075 * IMG_W;
+            double gapY = 0.0075 * IMG_H;
+
+            double leftW = 0.57 * innerW;
+            double rightW = innerW - leftW;
+
+            // Row 1
+            double row1H = 0.33 * innerH;
+            Rect livingRoomRect = new Rect(padX, padTop, leftW, row1H);
+            Rect bedroom2Rect = new Rect(padX + leftW + gapX, padTop, Math.Max(0, rightW - gapX), 0.46 * innerH);
+
+            // Row 2 (під "Вітальня"): Кухня (квадрат) + Хол (праворуч)
+            double row2Top = padTop + row1H + gapY;
+            double kitchenSize = leftW * 0.57;
+            Rect kitchenRect = new Rect(padX, row2Top, kitchenSize, kitchenSize);
+            Rect hallRect = new Rect(kitchenRect.X + kitchenRect.Width + gapX, row2Top,
+                                      Math.Max(0, leftW - kitchenRect.Width - gapX), kitchenSize * 1.35);
+
+            // Row 3 (зліва під Кухня та під Хол): Ванна та Тамбур
+            double row3Top = kitchenRect.Y + kitchenRect.Height + gapY;
+            double bathroomH = kitchenSize * 0.8;
+            Rect bathroomRect = new Rect(padX, row3Top, kitchenRect.Width, bathroomH);
+            Rect tambourRect = new Rect(hallRect.X, hallRect.Y + hallRect.Height + gapY,
+                                        hallRect.Width, kitchenSize + bathroomH - hallRect.Height);
+
+            // Права колонка знизу: Спальня 1 (трохи менша за Спальня 2)
+            double s1Top = padTop + bedroom2Rect.Height + gapY;
+            double s1H = 0.35 * innerH;
+            Rect bedroom1Rect = new Rect(padX + leftW + gapX, s1Top, Math.Max(0, rightW - gapX), s1H);
+
+            // Крильце: по центру внизу, вирівняне по центру з Тамбур
+            double porchW = tambourRect.Width;
+            double porchH = tambourRect.Height;
+            double porchX = tambourRect.X + tambourRect.Width / 2 - porchW / 2;
+            double porchY = tambourRect.Y + tambourRect.Height;
+            Rect porchRect = new Rect(porchX, porchY, porchW, porchH);
+
+            var livingRoom = new Room("Вітальня", livingRoomRect, this) { DefaultTemperature = 23, DefaultHumidity = 45 };
+            var bedroom2 = new Room("Спальня 2", bedroom2Rect, this) { DefaultTemperature = 22, DefaultHumidity = 50 };
+            var kitchen = new Room("Кухня", kitchenRect, this) { DefaultTemperature = 21, DefaultHumidity = 55 };
+            var hall = new Room("Хол", hallRect, this) { DefaultTemperature = 22, DefaultHumidity = 45 };
+            var bathroom = new Room("Ванна", bathroomRect, this) { DefaultTemperature = 24, DefaultHumidity = 60 };
+            var tambour = new Room("Тамбур", tambourRect, this) { DefaultTemperature = 20, DefaultHumidity = 50 };
+            var bedroom1 = new Room("Спальня 1", bedroom1Rect, this) { DefaultTemperature = 22, DefaultHumidity = 50 };
+            var porch = new Room("Крильце", porchRect, this) { DefaultTemperature = 18, DefaultHumidity = 50 };
             
-            _allRooms.AddRange(new[] { porch, tambour, hall, bedroom1, bedroom2, livingRoom, kitchen, bathroom });
+            _allRooms.AddRange(new[] { livingRoom, bedroom2, kitchen, hall, bathroom, tambour, bedroom1, porch });
 
             foreach (var room in _allRooms)
             {
@@ -107,80 +163,99 @@ namespace CourseWork
 
             // Створення пристроїв (кожен пристрій отримує посилання на MainWindow)
             // Windows (В)
-            _allDevices.Add(new WindowDevice("В1", "W001", bathroom, new Point(380, 180), new Size(30, 10), this) { DeviceType = DeviceType.Window });
-            _allDevices.Add(new WindowDevice("В2", "W002", bedroom1, new Point(20, 110), new Size(30, 10), this) { DeviceType = DeviceType.Window });
-            _allDevices.Add(new WindowDevice("В3", "W003", bedroom1, new Point(160, 110), new Size(30, 10), this) { DeviceType = DeviceType.Window });
-            _allDevices.Add(new WindowDevice("В4", "W004", bedroom2, new Point(20, 220), new Size(30, 10), this) { DeviceType = DeviceType.Window });
-            _allDevices.Add(new WindowDevice("В5", "W005", bedroom2, new Point(160, 220), new Size(30, 10), this) { DeviceType = DeviceType.Window });
-            _allDevices.Add(new WindowDevice("В6", "W006", livingRoom, new Point(220, 150), new Size(30, 10), this) { DeviceType = DeviceType.Window });
-            _allDevices.Add(new WindowDevice("В7", "W007", livingRoom, new Point(330, 150), new Size(30, 10), this) { DeviceType = DeviceType.Window });
-            _allDevices.Add(new WindowDevice("В8", "W008", kitchen, new Point(380, 130), new Size(30, 10), this) { DeviceType = DeviceType.Window });
+            const int windowDeviceWidth = 90, windowDeviceHeight = 30; // already x3
+            // Common size constants for other devices (3x original values)
+            const int motionLampSize = 15 * 3;
+            const int cameraSize = 10 * 3;
+            const int fireSprinklerSize = 15 * 3;
+            const int thermostatWidth = 20 * 3, thermostatHeight = 10 * 3;
+            const int heaterWidth = 20 * 3, heaterHeight = 10 * 3;
+            const int conditionerWidth = 20 * 3, conditionerHeight = 10 * 3;
+            const int humidifierWidth = 20 * 3, humidifierHeight = 10 * 3;
+            const int dehumidifierWidth = 20 * 3, dehumidifierHeight = 10 * 3;
+            const int chandelierSize = 25 * 3;
+            const int fanSize = 15 * 3;
+            const int solarPanelWidth = 30 * 3, solarPanelHeight = 15 * 3;
+            const int sirenSize = 15 * 3;
+            const int doorWidth = 10 * 3, doorHeight = 30 * 3;
+            const int batteryWidth = 20 * 3, batteryHeight = 10 * 3;
+            const int manualSwitchSize = 10 * 3;
+            const int stoveWidth = 25 * 3, stoveHeight = 20 * 3;
+
+            _allDevices.Add(new WindowDevice("В1", "W001", bathroom, new Point(380, 180), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
+            _allDevices.Add(new WindowDevice("В2", "W002", bedroom1, new Point(20, 110), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
+            _allDevices.Add(new WindowDevice("В3", "W003", bedroom1, new Point(160, 110), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
+            _allDevices.Add(new WindowDevice("В4", "W004", bedroom2, new Point(20, 220), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
+            _allDevices.Add(new WindowDevice("В5", "W005", bedroom2, new Point(160, 220), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
+            _allDevices.Add(new WindowDevice("В6", "W006", livingRoom, new Point(220, 150), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
+            _allDevices.Add(new WindowDevice("В7", "W007", livingRoom, new Point(330, 150), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
+            _allDevices.Add(new WindowDevice("В8", "W008", kitchen, new Point(380, 130), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
 
 
-            _allDevices.Add(new MotionSensorLamp("Л1", "L001", porch, new Point(20, 20), new Size(15, 15), this) { DeviceType = DeviceType.Lamp, ActivationDurationInSimMinutes = 12 });
-            _allDevices.Add(new MotionSensorLamp("Л2", "L002", tambour, new Point(130, 50), new Size(15, 15), this) { DeviceType = DeviceType.Lamp, ActivationDurationInSimMinutes = 12 });
+            _allDevices.Add(new MotionSensorLamp("Л1", "L001", porch, new Point(20, 20), new Size(motionLampSize, motionLampSize), this) { DeviceType = DeviceType.Lamp, ActivationDurationInSimMinutes = 12 });
+            _allDevices.Add(new MotionSensorLamp("Л2", "L002", tambour, new Point(130, 50), new Size(motionLampSize, motionLampSize), this) { DeviceType = DeviceType.Lamp, ActivationDurationInSimMinutes = 12 });
 
 
-            _allDevices.Add(new CameraDevice("К1", "C001", porch, new Point(50, 20), new Size(10, 10), this) { DeviceType = DeviceType.Camera, ActivationDurationInSimMinutes = 30 });
-            _allDevices.Add(new CameraDevice("К2", "C002", hall, new Point(220, 20), new Size(10, 10), this) { DeviceType = DeviceType.Camera, ActivationDurationInSimMinutes = 30 });
-            _allDevices.Add(new CameraDevice("К3", "C003", bedroom1, new Point(50, 180), new Size(10, 10), this) { DeviceType = DeviceType.Camera, ActivationDurationInSimMinutes = 30 });
-            _allDevices.Add(new CameraDevice("К4", "C004", bedroom2, new Point(50, 280), new Size(10, 10), this) { DeviceType = DeviceType.Camera, ActivationDurationInSimMinutes = 30 });
-            _allDevices.Add(new CameraDevice("К5", "C005", livingRoom, new Point(280, 280), new Size(10, 10), this) { DeviceType = DeviceType.Camera, ActivationDurationInSimMinutes = 30 });
+            _allDevices.Add(new CameraDevice("К1", "C001", porch, new Point(50, 20), new Size(cameraSize, cameraSize), this) { DeviceType = DeviceType.Camera, ActivationDurationInSimMinutes = 30 });
+            _allDevices.Add(new CameraDevice("К2", "C002", hall, new Point(220, 20), new Size(cameraSize, cameraSize), this) { DeviceType = DeviceType.Camera, ActivationDurationInSimMinutes = 30 });
+            _allDevices.Add(new CameraDevice("К3", "C003", bedroom1, new Point(50, 180), new Size(cameraSize, cameraSize), this) { DeviceType = DeviceType.Camera, ActivationDurationInSimMinutes = 30 });
+            _allDevices.Add(new CameraDevice("К4", "C004", bedroom2, new Point(50, 280), new Size(cameraSize, cameraSize), this) { DeviceType = DeviceType.Camera, ActivationDurationInSimMinutes = 30 });
+            _allDevices.Add(new CameraDevice("К5", "C005", livingRoom, new Point(280, 280), new Size(cameraSize, cameraSize), this) { DeviceType = DeviceType.Camera, ActivationDurationInSimMinutes = 30 });
 
-            _allDevices.Add(new FireSprinklerDevice("ВП1", "FS001", tambour, new Point(130, 20), new Size(15, 15), 0.80, this) { DeviceType = DeviceType.FireSystem });
-            _allDevices.Add(new FireSprinklerDevice("ВП2", "FS002", hall, new Point(250, 80), new Size(15, 15), 0.60, this) { DeviceType = DeviceType.FireSystem });
-            _allDevices.Add(new FireSprinklerDevice("ВП3", "FS003", hall, new Point(330, 80), new Size(15, 15), 0.75, this) { DeviceType = DeviceType.FireSystem });
-            _allDevices.Add(new FireSprinklerDevice("ВП4", "FS004", bedroom1, new Point(30, 140), new Size(15, 15), 0.50, this) { DeviceType = DeviceType.FireSystem });
-            _allDevices.Add(new FireSprinklerDevice("ВП5", "FS005", bedroom1, new Point(170, 140), new Size(15, 15), 0.90, this) { DeviceType = DeviceType.FireSystem });
-            _allDevices.Add(new FireSprinklerDevice("ВП6", "FS006", bedroom2, new Point(30, 250), new Size(15, 15), 0.60, this) { DeviceType = DeviceType.FireSystem });
-            _allDevices.Add(new FireSprinklerDevice("ВП7", "FS007", bedroom2, new Point(170, 250), new Size(15, 15), 0.85, this) { DeviceType = DeviceType.FireSystem });
-            _allDevices.Add(new FireSprinklerDevice("ВП8", "FS008", kitchen, new Point(380, 20), new Size(15, 15), 1.00, this, true) { DeviceType = DeviceType.FireSystem });
-            _allDevices.Add(new FireSprinklerDevice("ВП9", "FS009", livingRoom, new Point(230, 200), new Size(15, 15), 0.90, this) { DeviceType = DeviceType.FireSystem });
-            _allDevices.Add(new FireSprinklerDevice("ВП10", "FS010", livingRoom, new Point(340, 200), new Size(15, 15), 0.95, this) { DeviceType = DeviceType.FireSystem });
+            _allDevices.Add(new FireSprinklerDevice("ВП1", "FS001", tambour, new Point(130, 20), new Size(fireSprinklerSize, fireSprinklerSize), 0.80, this) { DeviceType = DeviceType.FireSystem });
+            _allDevices.Add(new FireSprinklerDevice("ВП2", "FS002", hall, new Point(250, 80), new Size(fireSprinklerSize, fireSprinklerSize), 0.60, this) { DeviceType = DeviceType.FireSystem });
+            _allDevices.Add(new FireSprinklerDevice("ВП3", "FS003", hall, new Point(330, 80), new Size(fireSprinklerSize, fireSprinklerSize), 0.75, this) { DeviceType = DeviceType.FireSystem });
+            _allDevices.Add(new FireSprinklerDevice("ВП4", "FS004", bedroom1, new Point(30, 140), new Size(fireSprinklerSize, fireSprinklerSize), 0.50, this) { DeviceType = DeviceType.FireSystem });
+            _allDevices.Add(new FireSprinklerDevice("ВП5", "FS005", bedroom1, new Point(170, 140), new Size(fireSprinklerSize, fireSprinklerSize), 0.90, this) { DeviceType = DeviceType.FireSystem });
+            _allDevices.Add(new FireSprinklerDevice("ВП6", "FS006", bedroom2, new Point(30, 250), new Size(fireSprinklerSize, fireSprinklerSize), 0.60, this) { DeviceType = DeviceType.FireSystem });
+            _allDevices.Add(new FireSprinklerDevice("ВП7", "FS007", bedroom2, new Point(170, 250), new Size(fireSprinklerSize, fireSprinklerSize), 0.85, this) { DeviceType = DeviceType.FireSystem });
+            _allDevices.Add(new FireSprinklerDevice("ВП8", "FS008", kitchen, new Point(380, 20), new Size(fireSprinklerSize, fireSprinklerSize), 1.00, this, true) { DeviceType = DeviceType.FireSystem });
+            _allDevices.Add(new FireSprinklerDevice("ВП9", "FS009", livingRoom, new Point(230, 200), new Size(fireSprinklerSize, fireSprinklerSize), 0.90, this) { DeviceType = DeviceType.FireSystem });
+            _allDevices.Add(new FireSprinklerDevice("ВП10", "FS010", livingRoom, new Point(340, 200), new Size(fireSprinklerSize, fireSprinklerSize), 0.95, this) { DeviceType = DeviceType.FireSystem });
 
-            _allDevices.Add(new ThermostatDevice("Т1", "TH001", bedroom1, new Point(150, 150), new Size(20, 10), this) { DeviceType = DeviceType.Thermostat });
-            _allDevices.Add(new ThermostatDevice("Т2", "TH002", bedroom2, new Point(150, 260), new Size(20, 10), this) { DeviceType = DeviceType.Thermostat });
-            _allDevices.Add(new ThermostatDevice("Т3", "TH003", livingRoom, new Point(280, 180), new Size(20, 10), this) { DeviceType = DeviceType.Thermostat });
+            _allDevices.Add(new ThermostatDevice("Т1", "TH001", bedroom1, new Point(150, 150), new Size(thermostatWidth, thermostatHeight), this) { DeviceType = DeviceType.Thermostat });
+            _allDevices.Add(new ThermostatDevice("Т2", "TH002", bedroom2, new Point(150, 260), new Size(thermostatWidth, thermostatHeight), this) { DeviceType = DeviceType.Thermostat });
+            _allDevices.Add(new ThermostatDevice("Т3", "TH003", livingRoom, new Point(280, 180), new Size(thermostatWidth, thermostatHeight), this) { DeviceType = DeviceType.Thermostat });
 
-            _allDevices.Add(new HeaterDevice("О1", "H001", bedroom1, new Point(150, 170), new Size(20, 10), this) { DeviceType = DeviceType.Heater });
-            _allDevices.Add(new HeaterDevice("О2", "H002", bedroom2, new Point(150, 240), new Size(20, 10), this) { DeviceType = DeviceType.Heater });
-            _allDevices.Add(new HeaterDevice("О3", "H003", livingRoom, new Point(280, 230), new Size(20, 10), this) { DeviceType = DeviceType.Heater });
+            _allDevices.Add(new HeaterDevice("О1", "H001", bedroom1, new Point(150, 170), new Size(heaterWidth, heaterHeight), this) { DeviceType = DeviceType.Heater });
+            _allDevices.Add(new HeaterDevice("О2", "H002", bedroom2, new Point(150, 240), new Size(heaterWidth, heaterHeight), this) { DeviceType = DeviceType.Heater });
+            _allDevices.Add(new HeaterDevice("О3", "H003", livingRoom, new Point(280, 230), new Size(heaterWidth, heaterHeight), this) { DeviceType = DeviceType.Heater });
 
-            _allDevices.Add(new ConditionerDevice("КОН1", "AC001", bedroom1, new Point(150, 130), new Size(20, 10), this) { DeviceType = DeviceType.Conditioner });
-            _allDevices.Add(new ConditionerDevice("КОН2", "AC002", bedroom2, new Point(150, 280), new Size(20, 10), this) { DeviceType = DeviceType.Conditioner });
-            _allDevices.Add(new ConditionerDevice("КОН3", "AC003", livingRoom, new Point(280, 160), new Size(20, 10), this) { DeviceType = DeviceType.Conditioner });
+            _allDevices.Add(new ConditionerDevice("КОН1", "AC001", bedroom1, new Point(150, 130), new Size(conditionerWidth, conditionerHeight), this) { DeviceType = DeviceType.Conditioner });
+            _allDevices.Add(new ConditionerDevice("КОН2", "AC002", bedroom2, new Point(150, 280), new Size(conditionerWidth, conditionerHeight), this) { DeviceType = DeviceType.Conditioner });
+            _allDevices.Add(new ConditionerDevice("КОН3", "AC003", livingRoom, new Point(280, 160), new Size(conditionerWidth, conditionerHeight), this) { DeviceType = DeviceType.Conditioner });
 
-            _allDevices.Add(new HumidifierDevice("З1", "HU001", bedroom1, new Point(120, 170), new Size(20, 10), this) { DeviceType = DeviceType.Humidifier });
-            _allDevices.Add(new HumidifierDevice("З2", "HU002", bedroom2, new Point(120, 240), new Size(20, 10), this) { DeviceType = DeviceType.Humidifier });
-            _allDevices.Add(new HumidifierDevice("З3", "HU003", livingRoom, new Point(250, 230), new Size(20, 10), this) { DeviceType = DeviceType.Humidifier });
+            _allDevices.Add(new HumidifierDevice("З1", "HU001", bedroom1, new Point(120, 170), new Size(humidifierWidth, humidifierHeight), this) { DeviceType = DeviceType.Humidifier });
+            _allDevices.Add(new HumidifierDevice("З2", "HU002", bedroom2, new Point(120, 240), new Size(humidifierWidth, humidifierHeight), this) { DeviceType = DeviceType.Humidifier });
+            _allDevices.Add(new HumidifierDevice("З3", "HU003", livingRoom, new Point(250, 230), new Size(humidifierWidth, humidifierHeight), this) { DeviceType = DeviceType.Humidifier });
 
-            _allDevices.Add(new DehumidifierDevice("ОС1", "DH001", bedroom1, new Point(120, 130), new Size(20, 10), this) { DeviceType = DeviceType.Dehumidifier });
-            _allDevices.Add(new DehumidifierDevice("ОС2", "DH002", bedroom2, new Point(120, 280), new Size(20, 10), this) { DeviceType = DeviceType.Dehumidifier });
-            _allDevices.Add(new DehumidifierDevice("ОС3", "DH003", livingRoom, new Point(250, 160), new Size(20, 10), this) { DeviceType = DeviceType.Dehumidifier });
+            _allDevices.Add(new DehumidifierDevice("ОС1", "DH001", bedroom1, new Point(120, 130), new Size(dehumidifierWidth, dehumidifierHeight), this) { DeviceType = DeviceType.Dehumidifier });
+            _allDevices.Add(new DehumidifierDevice("ОС2", "DH002", bedroom2, new Point(120, 280), new Size(dehumidifierWidth, dehumidifierHeight), this) { DeviceType = DeviceType.Dehumidifier });
+            _allDevices.Add(new DehumidifierDevice("ОС3", "DH003", livingRoom, new Point(250, 160), new Size(dehumidifierWidth, dehumidifierHeight), this) { DeviceType = DeviceType.Dehumidifier });
 
-            _allDevices.Add(new ChandelierDevice("ЛЮ1", "CH001", hall, new Point(250, 50), new Size(25, 25), this) { DeviceType = DeviceType.Chandelier });
-            _allDevices.Add(new ChandelierDevice("ЛЮ2", "CH002", bedroom1, new Point(90, 150), new Size(25, 25), this) { DeviceType = DeviceType.Chandelier });
-            _allDevices.Add(new ChandelierDevice("ЛЮ3", "CH003", bedroom2, new Point(90, 260), new Size(25, 25), this) { DeviceType = DeviceType.Chandelier });
-            _allDevices.Add(new ChandelierDevice("ЛЮ4", "CH004", livingRoom, new Point(280, 250), new Size(25, 25), this) { DeviceType = DeviceType.Chandelier });
-            _allDevices.Add(new ChandelierDevice("ЛЮ5", "CH005", kitchen, new Point(420, 80), new Size(25, 25), this) { DeviceType = DeviceType.Chandelier });
-            _allDevices.Add(new ChandelierDevice("ЛЮ6", "CH006", bathroom, new Point(420, 230), new Size(25, 25), this) { DeviceType = DeviceType.Chandelier });
+            _allDevices.Add(new ChandelierDevice("ЛЮ1", "CH001", hall, new Point(250, 50), new Size(chandelierSize, chandelierSize), this) { DeviceType = DeviceType.Chandelier });
+            _allDevices.Add(new ChandelierDevice("ЛЮ2", "CH002", bedroom1, new Point(90, 150), new Size(chandelierSize, chandelierSize), this) { DeviceType = DeviceType.Chandelier });
+            _allDevices.Add(new ChandelierDevice("ЛЮ3", "CH003", bedroom2, new Point(90, 260), new Size(chandelierSize, chandelierSize), this) { DeviceType = DeviceType.Chandelier });
+            _allDevices.Add(new ChandelierDevice("ЛЮ4", "CH004", livingRoom, new Point(280, 250), new Size(chandelierSize, chandelierSize), this) { DeviceType = DeviceType.Chandelier });
+            _allDevices.Add(new ChandelierDevice("ЛЮ5", "CH005", kitchen, new Point(420, 80), new Size(chandelierSize, chandelierSize), this) { DeviceType = DeviceType.Chandelier });
+            _allDevices.Add(new ChandelierDevice("ЛЮ6", "CH006", bathroom, new Point(420, 230), new Size(chandelierSize, chandelierSize), this) { DeviceType = DeviceType.Chandelier });
 
-            _allDevices.Add(new FanDevice("ВЕ1", "F001", bathroom, new Point(400, 200), new Size(15, 15), this, true) { DeviceType = DeviceType.Fan });
-            _allDevices.Add(new FanDevice("ВЕ2", "F002", kitchen, new Point(400, 50), new Size(15, 15), this, false) { DeviceType = DeviceType.Fan });
+            _allDevices.Add(new FanDevice("ВЕ1", "F001", bathroom, new Point(400, 200), new Size(fanSize, fanSize), this, true) { DeviceType = DeviceType.Fan });
+            _allDevices.Add(new FanDevice("ВЕ2", "F002", kitchen, new Point(400, 50), new Size(fanSize, fanSize), this, false) { DeviceType = DeviceType.Fan });
 
-            _allDevices.Add(new SolarPanelDevice("СП1", "SP001", porch, new Point(70, 50), new Size(30, 15), this) { DeviceType = DeviceType.Special });
-            _allDevices.Add(new SolarPanelDevice("СП2", "SP002", porch, new Point(70, 70), new Size(30, 15), this) { DeviceType = DeviceType.Special }); // Added СП2
-            _allDevices.Add(new SirenDevice("С1", "SR001", hall, new Point(300, 20), new Size(15, 15), this) { DeviceType = DeviceType.Special });
-            _allDevices.Add(new DoorDevice("Д1", "D001", porch, new Point(50, 70), new Size(10, 30), this) { DeviceType = DeviceType.Special });
-            _allDevices.Add(new BatteryDevice("Б1", "B001", hall, new Point(320, 20), new Size(20, 10), this) { DeviceType = DeviceType.Special });
-            _allDevices.Add(new ManualSwitchDevice("Перемикач ВП8", "SW001", kitchen, new Point(420, 20), new Size(10, 10), this,
+            _allDevices.Add(new SolarPanelDevice("СП1", "SP001", porch, new Point(70, 50), new Size(solarPanelWidth, solarPanelHeight), this) { DeviceType = DeviceType.Special });
+            _allDevices.Add(new SolarPanelDevice("СП2", "SP002", porch, new Point(70, 70), new Size(solarPanelWidth, solarPanelHeight), this) { DeviceType = DeviceType.Special }); // Added СП2
+            _allDevices.Add(new SirenDevice("С1", "SR001", hall, new Point(300, 20), new Size(sirenSize, sirenSize), this) { DeviceType = DeviceType.Special });
+            _allDevices.Add(new DoorDevice("Д1", "D001", porch, new Point(50, 70), new Size(doorWidth, doorHeight), this) { DeviceType = DeviceType.Special });
+            _allDevices.Add(new BatteryDevice("Б1", "B001", hall, new Point(320, 20), new Size(batteryWidth, batteryHeight), this) { DeviceType = DeviceType.Special });
+            _allDevices.Add(new ManualSwitchDevice("Перемикач ВП8", "SW001", kitchen, new Point(420, 20), new Size(manualSwitchSize, manualSwitchSize), this,
                 (simTime, powerOn) => {
                     var vp8 = _allDevices.OfType<FireSprinklerDevice>().FirstOrDefault(d => d.Id == "FS008");
                     vp8?.ActivateManual(simTime); // Pass current simTime
                     // LogEvent is called from within ActivateManual now
                 })
             { DeviceType = DeviceType.Special });
-            _allDevices.Add(new StoveDevice("Плита", "ST001", kitchen, new Point(400, 80), new Size(25, 20), this) { DeviceType = DeviceType.Special });
+            _allDevices.Add(new StoveDevice("Плита", "ST001", kitchen, new Point(400, 80), new Size(stoveWidth, stoveHeight), this) { DeviceType = DeviceType.Special });
 
             foreach (var device in _allDevices)
             {
@@ -193,8 +268,15 @@ namespace CourseWork
         {
             // Логіка сплеш-скріна тепер в App.xaml.cs.
             // Цей метод тепер лише запускає симуляцію.
-            _simulationTimer.Start();
-            LogEvent("Симуляцію розпочато.");
+            if (!IsSimulationPaused)
+            {
+                _simulationTimer.Start();
+                LogEvent("Симуляцію розпочато.");
+            }
+            else
+            {
+                LogEvent("Симуляцію призупинено.");
+            }
         }
 
         private void SimulationTimer_Tick(object sender, EventArgs e)
@@ -473,10 +555,33 @@ namespace CourseWork
             var tempLog = new List<LogEntry>(LogEntries);
             LogEntries.Clear();
             LogEvent("Систему скинуто до початкових значень.");
-            LogEvent("Симуляцію розпочато.");
-            _simulationTimer.Start();
+            if (!IsSimulationPaused)
+            {
+                LogEvent("Симуляцію розпочато.");
+                _simulationTimer.Start();
+            }
+            else
+            {
+                LogEvent("Симуляцію призупинено.");
+            }
         }
 
+        // New: Pause/Resume button click handler
+        private void TogglePause_Click(object sender, RoutedEventArgs e)
+        {
+            if (IsSimulationPaused)
+            {
+                IsSimulationPaused = false;
+                _simulationTimer.Start();
+                LogEvent("Симуляцію відновлено.");
+            }
+            else
+            {
+                IsSimulationPaused = true;
+                _simulationTimer.Stop();
+                LogEvent("Симуляцію призупинено.");
+            }
+        }
 
         private void ReloadAllFireSystems()
         {
@@ -629,6 +734,11 @@ namespace CourseWork
         private bool _isHighlighted = false;
         public bool IsHighlighted { get => _isHighlighted; set { _isHighlighted = value; OnPropertyChanged(); } }
         public Point Position => Device.Position;
+        // New: absolute position on canvas = room's top-left + device's relative position
+        public Point AbsolutePosition => Device.AssociatedRoom != null
+            ? new Point(Device.AssociatedRoom.AreaRect.X + Device.Position.X,
+                        Device.AssociatedRoom.AreaRect.Y + Device.Position.Y)
+            : Device.Position;
         public Size Size => Device.Size;
         public bool IsThermostat => Device is ThermostatDevice;
         public double TargetTemperature
@@ -649,6 +759,8 @@ namespace CourseWork
                 { OnPropertyChanged(nameof(State)); OnPropertyChanged(nameof(CurrentStateDescription)); }
                 if (e.PropertyName == nameof(ThermostatDevice.TargetTemperature)) OnPropertyChanged(nameof(TargetTemperature));
                 if (e.PropertyName == nameof(ThermostatDevice.TargetHumidity)) OnPropertyChanged(nameof(TargetHumidity));
+                if (e.PropertyName == nameof(SmartDeviceBase.Position) || e.PropertyName == nameof(SmartDeviceBase.AssociatedRoom))
+                { OnPropertyChanged(nameof(Position)); OnPropertyChanged(nameof(AbsolutePosition)); }
             };
         }
         public string CurrentStateDescription => Device.CurrentStateDescription;
@@ -1197,3 +1309,4 @@ namespace CourseWork
         }
     }
 }
+

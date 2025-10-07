@@ -103,45 +103,46 @@ namespace CourseWork
             // Row 3: "Ванна" зліва під "Кухня", "Тамбур" під "Хол", праворуч/внизу продовження зони для "Спальня 1"
             // "Крильце" внизу по центру, вирівняне по центру з "Тамбур".
             double IMG_W = 1446, IMG_H = 1688;
-            double padX = 0.15 * IMG_W;         // бічні відступи від країв зображення
-            double padTop = 0.14 * IMG_H;       // верхній відступ
+            double padX = 0.145 * IMG_W;         // бічні відступи від країв зображення
+            double padTop = 0.137 * IMG_H;       // верхній відступ
             double padBottom = 0.15 * IMG_H;    // нижній відступ
             double innerW = IMG_W - 2 * padX;
             double innerH = IMG_H - padTop - padBottom;
             double gapX = 0.0075 * IMG_W;
-            double gapY = 0.0075 * IMG_H;
+            double gapY = 0.007 * IMG_H;
 
-            double leftW = 0.57 * innerW;
+            double leftW = 0.575 * innerW;
             double rightW = innerW - leftW;
 
             // Row 1
-            double row1H = 0.33 * innerH;
+            double row1H = 0.335 * innerH;
             Rect livingRoomRect = new Rect(padX, padTop, leftW, row1H);
-            Rect bedroom2Rect = new Rect(padX + leftW + gapX, padTop, Math.Max(0, rightW - gapX), 0.46 * innerH);
+            Rect bedroom2Rect = new Rect(padX + leftW + gapX, padTop, 0.98 * Math.Max(0, rightW - gapX), 0.458 * innerH);
 
             // Row 2 (під "Вітальня"): Кухня (квадрат) + Хол (праворуч)
             double row2Top = padTop + row1H + gapY;
-            double kitchenSize = leftW * 0.57;
-            Rect kitchenRect = new Rect(padX, row2Top, kitchenSize, kitchenSize);
+            double kitchenSize = leftW * 0.59;
+            double kitchenH = kitchenSize * 0.905;
+            Rect kitchenRect = new Rect(padX, row2Top, kitchenSize, kitchenH);
             Rect hallRect = new Rect(kitchenRect.X + kitchenRect.Width + gapX, row2Top,
-                                      Math.Max(0, leftW - kitchenRect.Width - gapX), kitchenSize * 1.35);
+                                      Math.Max(0, leftW - kitchenRect.Width - gapX), kitchenSize * 1.265);
 
             // Row 3 (зліва під Кухня та під Хол): Ванна та Тамбур
             double row3Top = kitchenRect.Y + kitchenRect.Height + gapY;
-            double bathroomH = kitchenSize * 0.8;
+            double bathroomH = kitchenH * 0.88;
             Rect bathroomRect = new Rect(padX, row3Top, kitchenRect.Width, bathroomH);
             Rect tambourRect = new Rect(hallRect.X, hallRect.Y + hallRect.Height + gapY,
-                                        hallRect.Width, kitchenSize + bathroomH - hallRect.Height);
+                                        hallRect.Width, kitchenH + bathroomH - hallRect.Height);
 
             // Права колонка знизу: Спальня 1 (трохи менша за Спальня 2)
             double s1Top = padTop + bedroom2Rect.Height + gapY;
-            double s1H = 0.35 * innerH;
-            Rect bedroom1Rect = new Rect(padX + leftW + gapX, s1Top, Math.Max(0, rightW - gapX), s1H);
+            double s1H = 0.38 * innerH;
+            Rect bedroom1Rect = new Rect(padX + leftW + gapX, s1Top, 0.98 * Math.Max(0, rightW - gapX), s1H);
 
             // Крильце: по центру внизу, вирівняне по центру з Тамбур
-            double porchW = tambourRect.Width;
-            double porchH = tambourRect.Height;
-            double porchX = tambourRect.X + tambourRect.Width / 2 - porchW / 2;
+            double porchW = tambourRect.Width * 4.415;
+            double porchH = tambourRect.Height * 1.3;
+            double porchX = tambourRect.X + tambourRect.Width / 1.55 - porchW / 2;
             double porchY = tambourRect.Y + tambourRect.Height;
             Rect porchRect = new Rect(porchX, porchY, porchW, porchH);
 
@@ -163,7 +164,7 @@ namespace CourseWork
 
             // Створення пристроїв (кожен пристрій отримує посилання на MainWindow)
             // Windows (В)
-            const int windowDeviceWidth = 90, windowDeviceHeight = 30; // already x3
+            const int windowDeviceWidth = 170, windowDeviceHeight = 33; // already x3
             // Common size constants for other devices (3x original values)
             const int motionLampSize = 15 * 3;
             const int cameraSize = 10 * 3;
@@ -175,21 +176,21 @@ namespace CourseWork
             const int dehumidifierWidth = 20 * 3, dehumidifierHeight = 10 * 3;
             const int chandelierSize = 25 * 3;
             const int fanSize = 15 * 3;
-            const int solarPanelWidth = 30 * 3, solarPanelHeight = 15 * 3;
+            const int solarPanelWidth = 278, solarPanelHeight = 90;
             const int sirenSize = 15 * 3;
-            const int doorWidth = 10 * 3, doorHeight = 30 * 3;
+            const int doorWidth = 100, doorHeight = 27;
             const int batteryWidth = 20 * 3, batteryHeight = 10 * 3;
             const int manualSwitchSize = 10 * 3;
             const int stoveWidth = 25 * 3, stoveHeight = 20 * 3;
 
-            _allDevices.Add(new WindowDevice("В1", "W001", bathroom, new Point(380, 180), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
-            _allDevices.Add(new WindowDevice("В2", "W002", bedroom1, new Point(20, 110), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
-            _allDevices.Add(new WindowDevice("В3", "W003", bedroom1, new Point(160, 110), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
-            _allDevices.Add(new WindowDevice("В4", "W004", bedroom2, new Point(20, 220), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
-            _allDevices.Add(new WindowDevice("В5", "W005", bedroom2, new Point(160, 220), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
-            _allDevices.Add(new WindowDevice("В6", "W006", livingRoom, new Point(220, 150), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
-            _allDevices.Add(new WindowDevice("В7", "W007", livingRoom, new Point(330, 150), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
-            _allDevices.Add(new WindowDevice("В8", "W008", kitchen, new Point(380, 130), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
+            _allDevices.Add(new WindowDevice("В1", "W001", bathroom, new Point(110, 248), new Size(windowDeviceWidth * 0.70, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
+            _allDevices.Add(new WindowDevice("В2", "W002", bedroom1, new Point(158, 427), new Size(windowDeviceWidth * 0.70, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
+            _allDevices.Add(new WindowDevice("В3", "W003", bedroom1, new Point(386, 140), new Size(windowDeviceHeight, windowDeviceWidth), this) { DeviceType = DeviceType.Window });
+            _allDevices.Add(new WindowDevice("В4", "W004", bedroom2, new Point(387, 263), new Size(windowDeviceHeight, windowDeviceWidth), this) { DeviceType = DeviceType.Window });
+            _allDevices.Add(new WindowDevice("В5", "W005", bedroom2, new Point(118, 0), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
+            _allDevices.Add(new WindowDevice("В6", "W006", livingRoom, new Point(375, 0), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
+            _allDevices.Add(new WindowDevice("В7", "W007", livingRoom, new Point(116, 0), new Size(windowDeviceWidth, windowDeviceHeight), this) { DeviceType = DeviceType.Window });
+            _allDevices.Add(new WindowDevice("В8", "W008", kitchen, new Point(0, 63), new Size(windowDeviceHeight, windowDeviceWidth), this) { DeviceType = DeviceType.Window });
 
 
             _allDevices.Add(new MotionSensorLamp("Л1", "L001", porch, new Point(20, 20), new Size(motionLampSize, motionLampSize), this) { DeviceType = DeviceType.Lamp, ActivationDurationInSimMinutes = 12 });
@@ -243,10 +244,10 @@ namespace CourseWork
             _allDevices.Add(new FanDevice("ВЕ1", "F001", bathroom, new Point(400, 200), new Size(fanSize, fanSize), this, true) { DeviceType = DeviceType.Fan });
             _allDevices.Add(new FanDevice("ВЕ2", "F002", kitchen, new Point(400, 50), new Size(fanSize, fanSize), this, false) { DeviceType = DeviceType.Fan });
 
-            _allDevices.Add(new SolarPanelDevice("СП1", "SP001", porch, new Point(70, 50), new Size(solarPanelWidth, solarPanelHeight), this) { DeviceType = DeviceType.Special });
-            _allDevices.Add(new SolarPanelDevice("СП2", "SP002", porch, new Point(70, 70), new Size(solarPanelWidth, solarPanelHeight), this) { DeviceType = DeviceType.Special }); // Added СП2
+            _allDevices.Add(new SolarPanelDevice("СП1", "SP001", porch, new Point(0, 92), new Size(solarPanelWidth, solarPanelHeight), this) { DeviceType = DeviceType.Special });
+            _allDevices.Add(new SolarPanelDevice("СП2", "SP002", porch, new Point(680, 92), new Size(solarPanelWidth, solarPanelHeight), this) { DeviceType = DeviceType.Special }); // Added СП2
             _allDevices.Add(new SirenDevice("С1", "SR001", hall, new Point(300, 20), new Size(sirenSize, sirenSize), this) { DeviceType = DeviceType.Special });
-            _allDevices.Add(new DoorDevice("Д1", "D001", porch, new Point(50, 70), new Size(doorWidth, doorHeight), this) { DeviceType = DeviceType.Special });
+            _allDevices.Add(new DoorDevice("Д1", "D001", porch, new Point(419, -27), new Size(doorWidth, doorHeight), this) { DeviceType = DeviceType.Special });
             _allDevices.Add(new BatteryDevice("Б1", "B001", hall, new Point(320, 20), new Size(batteryWidth, batteryHeight), this) { DeviceType = DeviceType.Special });
             _allDevices.Add(new ManualSwitchDevice("Перемикач ВП8", "SW001", kitchen, new Point(420, 20), new Size(manualSwitchSize, manualSwitchSize), this,
                 (simTime, powerOn) => {

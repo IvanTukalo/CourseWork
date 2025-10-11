@@ -44,7 +44,7 @@
                     <Rectangle Width="{Binding Size.Width}" Height="{Binding Size.Height}" 
                                        Fill="{Binding Device.DeviceType, Converter={StaticResource DeviceFillColorConverter}}" 
                                        Stroke="{Binding State, Converter={StaticResource DeviceBorderColorConverter}}" 
-                                       StrokeThickness="2" Opacity="0.6" Cursor="Hand" 
+                                       StrokeThickness="3" Opacity="0.6" Cursor="Hand" 
                         ToolTip="{Binding Device.Name}"
                                        MouseLeftButtonDown="Device_MouseLeftButtonDown" 
                                        MouseEnter="Device_MouseEnter" 

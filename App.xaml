@@ -10,7 +10,7 @@
         <local:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
         <local:InvertedBooleanToVisibilityConverter x:Key="InvertedBooleanToVisibilityConverter"/>
         <local:BooleanToButtonContentConverter x:Key="FireButtonContentConverter" TrueValue="Потушити" FalseValue="Підпалити"/>
-        <local:BooleanToButtonContentConverter x:Key="ElectricityButtonContentConverter" TrueValue="Увімкнути Електроенергію" FalseValue="Вимкнути Електроенергію"/>
+        <local:BooleanToButtonContentConverter x:Key="ElectricityButtonContentConverter" TrueValue="Вимкнути Електроенергію" FalseValue="Увімкнути Електроенергію"/>
         <local:DeviceStateToActionTextConverter x:Key="DeviceStateToActionTextConverter"/>
         <local:DeviceActionToVisibilityConverter x:Key="DeviceActionToVisibilityConverter"/>
         <local:BooleanToButtonContentConverter x:Key="PauseButtonContentConverter" TrueValue="Продовжити симуляцію" FalseValue="Пауза"/>

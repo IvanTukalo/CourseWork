@@ -26,6 +26,10 @@ namespace CourseWork
         public const double UPDATE_INTERVAL_SECONDS = 0.5;
 
         private DispatcherTimer _simulationTimer;
+        private DispatcherTimer _alarmTimer;
+        private TimeSpan _alarmEndTime = TimeSpan.Zero;
+        private bool _isAlarmPlaying = false;
+
         private TimeSpan _currentSimTime;
         public TimeSpan CurrentSimTime
         {
@@ -38,7 +42,16 @@ namespace CourseWork
         public bool IsElectricityOn
         {
             get => _isElectricityOn;
-            set { _isElectricityOn = value; OnPropertyChanged(); LogEvent($"Електроенергію {(value ? "увімкнено" : "вимкнено")}"); UpdateAllDeviceStatesAfterPowerChange(); }
+            set 
+            { 
+                _isElectricityOn = value; 
+                OnPropertyChanged(); 
+                if (value)
+                    LogEvent("Постачання електроенергії відновлено");
+                else
+                    LogEvent("Відсутнє постачання електроенергії");
+                UpdateAllDeviceStatesAfterPowerChange(); 
+            }
         }
 
         // New: Pause/Resume simulation state
@@ -89,6 +102,39 @@ namespace CourseWork
             _simulationTimer = new DispatcherTimer();
             _simulationTimer.Interval = TimeSpan.FromSeconds(UPDATE_INTERVAL_SECONDS);
             _simulationTimer.Tick += SimulationTimer_Tick;
+            
+            _alarmTimer = new DispatcherTimer();
+            _alarmTimer.Interval = TimeSpan.FromMilliseconds(500);
+            _alarmTimer.Tick += AlarmTimer_Tick;
+        }
+
+        private void AlarmTimer_Tick(object sender, EventArgs e)
+        {
+            if (CurrentSimTime >= _alarmEndTime)
+            {
+                StopAlarm();
+            }
+            else
+            {
+                // Play beep sound (Windows system beep)
+                System.Media.SystemSounds.Exclamation.Play();
+            }
+        }
+
+        public void StartAlarm()
+        {
+            if (!_isAlarmPlaying)
+            {
+                _isAlarmPlaying = true;
+                _alarmEndTime = CurrentSimTime.Add(TimeSpan.FromMinutes(30));
+                _alarmTimer.Start();
+            }
+        }
+
+        private void StopAlarm()
+        {
+            _isAlarmPlaying = false;
+            _alarmTimer.Stop();
         }
 
         private void InitializeDevicesAndRooms()
@@ -287,8 +333,40 @@ namespace CourseWork
 
             bool hasSolarPower = _allDevices.OfType<SolarPanelDevice>().Any(p => p.CurrentState == DeviceState.Working);
             var mainBattery = _allDevices.OfType<BatteryDevice>().FirstOrDefault();
-            bool batteryHasPower = mainBattery?.CurrentState == DeviceState.Working && mainBattery.ChargeLevel > 0;
+            bool batteryHasPower = mainBattery != null && mainBattery.ChargeLevel > 0;
             bool effectivePower = IsElectricityOn || hasSolarPower || (!IsElectricityOn && batteryHasPower);
+
+            // Визначаємо, чи батарея має живити критичні пристрої
+            bool batteryPoweringDevices = !IsElectricityOn && !hasSolarPower && batteryHasPower;
+
+            // SET BATTERY STATE BEFORE UPDATING DEVICES
+            // Підраховуємо кількість активних критичних пристроїв, що живляться від батареї
+            int activeCriticalDevices = 0;
+            if (batteryPoweringDevices)
+            {
+                // Камери К1-К5
+                activeCriticalDevices += _allDevices.OfType<CameraDevice>().Count(d => d.CurrentState != DeviceState.Off);
+                // Спринклери ВП1-ВП10
+                activeCriticalDevices += _allDevices.OfType<FireSprinklerDevice>().Count(d => d.CurrentState == DeviceState.Working || d.CurrentState == DeviceState.Active);
+                // Сирена С1
+                activeCriticalDevices += _allDevices.OfType<SirenDevice>().Count(d => d.CurrentState == DeviceState.Active);
+                // Вікна В1-В8 (сенсори)
+                activeCriticalDevices += _allDevices.OfType<WindowDevice>().Count(d => d.CurrentState == DeviceState.Working);
+                // Двері Д1 (сенсори)
+                activeCriticalDevices += _allDevices.OfType<DoorDevice>().Count(d => d.CurrentState == DeviceState.Working);
+                // Термостати Т1-Т3 (сенсори)
+                activeCriticalDevices += _allDevices.OfType<ThermostatDevice>().Count(d => d.CurrentState == DeviceState.Working);
+                // Вентилятори ВЕ1-ВЕ2
+                activeCriticalDevices += _allDevices.OfType<FanDevice>().Count(d => d.CurrentState == DeviceState.Working);
+            }
+
+            // Set battery state BEFORE updating all devices
+            if (mainBattery != null)
+            {
+                mainBattery.IsDischarging = batteryPoweringDevices;
+                mainBattery.IsCharging = (IsElectricityOn || hasSolarPower) && mainBattery.ChargeLevel < 100.0;
+                mainBattery.ActiveDeviceCount = activeCriticalDevices;
+            }
 
             foreach (var room in _allRooms)
                 room.UpdateEnvironment(elapsedSimTimePerTick, effectivePower);
@@ -300,11 +378,6 @@ namespace CourseWork
                     _allDevices.OfType<FanDevice>().FirstOrDefault(f => f.Id == "F002")?.ActivateManual(effectivePower);
             }
 
-            if (mainBattery != null)
-            {
-                mainBattery.IsDischarging = !IsElectricityOn && !hasSolarPower;
-                mainBattery.IsCharging = hasSolarPower;
-            }
             SelectedRoomInfo?.Refresh();
         }
         private void UpdateAllDeviceStatesAfterPowerChange()
@@ -663,9 +736,9 @@ namespace CourseWork
         {
             if (SelectedRoomInfo != null && sender is TextBox tb)
             {
-                if (double.TryParse(tb.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double temp))
-                    SelectedRoomInfo.Temperature = Math.Max(0, Math.Min(40, temp));
-                tb.Text = SelectedRoomInfo.Temperature.ToString("F1", CultureInfo.InvariantCulture);
+                if (int.TryParse(tb.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out int temp))
+                    SelectedRoomInfo.Temperature = Math.Max(-273, Math.Min(1000, temp));
+                tb.Text = SelectedRoomInfo.Temperature.ToString("F0", CultureInfo.InvariantCulture);
             }
         }
 
@@ -802,8 +875,8 @@ namespace CourseWork
         public string FireStatusText => HasFire ? "Присутній" : "Відсутній";
         public bool CanControlFire => _currentRoom != null;
         public string BreakInStatusText => _currentRoom?.IsBreached ?? false ? "Присутній (Вікно/Двері зламано)" : "Відсутній";
-        public double Temperature { get => _currentRoom?.CurrentTemperature ?? 0; set { if (_currentRoom != null) { _currentRoom.CurrentTemperature = value; OnPropertyChanged(); OnPropertyChanged(nameof(TemperatureString)); } } }
-        public string TemperatureString { get => Temperature.ToString("F1", CultureInfo.InvariantCulture); set { if (double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out double temp)) Temperature = Math.Max(0, Math.Min(40, temp)); OnPropertyChanged(); } }
+        public int Temperature { get => _currentRoom?.CurrentTemperature ?? 0; set { if (_currentRoom != null) { _currentRoom.CurrentTemperature = value; OnPropertyChanged(); OnPropertyChanged(nameof(TemperatureString)); } } }
+        public string TemperatureString { get => Temperature.ToString("F0", CultureInfo.InvariantCulture); set { if (int.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out int temp)) Temperature = Math.Max(-273, temp); OnPropertyChanged(); } }
         public int Humidity { get => _currentRoom?.CurrentHumidity ?? 0; set { if (_currentRoom != null) { _currentRoom.CurrentHumidity = value; OnPropertyChanged(); OnPropertyChanged(nameof(HumidityString)); } } }
         public string HumidityString { get => Humidity.ToString("F0", CultureInfo.InvariantCulture); set { if (int.TryParse(value, out int hum)) Humidity = Math.Max(0, Math.Min(100, hum)); OnPropertyChanged(); } }
         public ObservableCollection<DeviceViewModel> DevicesInRoom { get; }
@@ -823,8 +896,8 @@ namespace CourseWork
             _mainWindow = mainWindow; DevicesInRoom = new ObservableCollection<DeviceViewModel>(); IsRoomSelected = false;
             DeviceActionCommand = new RelayCommand<DeviceViewModel>(ExecuteDeviceAction);
             ToggleFireStatusCommand = new RelayCommand(() => HasFire = !HasFire, () => CanControlFire);
-            IncreaseTempCommand = new RelayCommand(() => Temperature = Math.Min(40, Temperature + 1));
-            DecreaseTempCommand = new RelayCommand(() => Temperature = Math.Max(0, Temperature - 1));
+            IncreaseTempCommand = new RelayCommand(() => Temperature = Math.Min(1000, Temperature + 1));
+            DecreaseTempCommand = new RelayCommand(() => Temperature = Math.Max(-273, Temperature - 1));
             IncreaseHumidityCommand = new RelayCommand(() => Humidity = Math.Min(100, Humidity + 1));
             DecreaseHumidityCommand = new RelayCommand(() => Humidity = Math.Max(0, Humidity - 1));
             IncreaseTargetTempCommand = new RelayCommand<DeviceViewModel>(vm => { if (vm?.Device is ThermostatDevice td) vm.TargetTemperature = Math.Min(28, td.TargetTemperature + 1); });
@@ -899,17 +972,62 @@ namespace CourseWork
         public Size Size { get; set; }
         public DeviceType DeviceType { get; set; } = DeviceType.Unknown;
         private DeviceState _currentState;
-        public DeviceState CurrentState { get => _currentState; protected set { if (_currentState != value) { _currentState = value; OnPropertyChanged(); OnPropertyChanged(nameof(CurrentStateDescription)); } } }
+        public DeviceState CurrentState 
+        { 
+            get => _currentState; 
+            protected set 
+            { 
+                if (_currentState != value) 
+                { 
+                    var oldState = _currentState;
+                    _currentState = value; 
+                    OnPropertyChanged(); 
+                    OnPropertyChanged(nameof(CurrentStateDescription));
+                    
+                    // Log status change with proper Ukrainian description
+                    string statusName = GetStatusName(value);
+                    if (!string.IsNullOrEmpty(statusName))
+                    {
+                        MainWindowContext?.LogEvent($"Об'єкт {Name} змінив свій статус на {statusName}");
+                    }
+                } 
+            } 
+        }
+        
+        protected virtual string GetStatusName(DeviceState state)
+        {
+            // Default status names - can be overridden in derived classes
+            switch (state)
+            {
+                case DeviceState.Off: return "Вимкнено";
+                case DeviceState.Working: return "Працює";
+                case DeviceState.NotWorking: return "Не працює";
+                case DeviceState.Active: return "Активний";
+                case DeviceState.Inactive: return "Неактивний";
+                case DeviceState.Destroyed: return "Зруйновано";
+                case DeviceState.EmptyWater: return "Порожній";
+                case DeviceState.NeedsRecharge: return "Перезарядка";
+                case DeviceState.Charging: return "Зарядка";
+                default: return state.ToString();
+            }
+        }
+        
         public virtual string CurrentStateDescription => CurrentState.ToString();
         protected SmartDeviceBase(string name, string id, Room room, Point position, Size size, MainWindow mainWindowContext)
         { Name = name; Id = id; AssociatedRoom = room; Position = position; Size = size; CurrentState = DeviceState.Off; MainWindowContext = mainWindowContext; }
         public abstract void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment);
         public virtual void Interact(ToolType tool, bool isElectricityOn, TimeSpan currentTime) { }
         public virtual void Reset() { CurrentState = DeviceState.Off; }
-        public virtual void Repair() { if (CurrentState == DeviceState.Destroyed || CurrentState == DeviceState.NotWorking) { CurrentState = DeviceState.Working; Log("Відремонтовано."); } }
+        public virtual void Repair() { if (CurrentState == DeviceState.Destroyed || CurrentState == DeviceState.NotWorking) { CurrentState = DeviceState.Working; } }
         public event PropertyChangedEventHandler PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string propertyName = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        protected void Log(string message) => MainWindowContext?.LogEvent($"[{Name}{(AssociatedRoom != null ? $" у {AssociatedRoom.Name}" : "")}] {message}");
+        protected void Log(string message)
+        {
+            string roomInfo = AssociatedRoom != null && !string.IsNullOrEmpty(AssociatedRoom.Name)
+                ? $"(Room: {AssociatedRoom.Name})"
+                : "(Room: Unknown)";
+            MainWindowContext?.LogEvent($"[{Name}] {roomInfo} {message}");
+        }
     }
 
     public interface IOnOffToggleable { void TurnOn(bool isElectricityOn); void TurnOff(); void ToggleState(bool isElectricityOn); }
@@ -917,6 +1035,18 @@ namespace CourseWork
     public class WindowDevice : SmartDeviceBase
     {
         public WindowDevice(string name, string id, Room room, Point position, Size size, MainWindow mw) : base(name, id, room, position, size, mw) { CurrentState = DeviceState.Working; }
+        
+        protected override string GetStatusName(DeviceState state)
+        {
+            switch (state)
+            {
+                case DeviceState.Working: return "Ціле";
+                case DeviceState.Off: return "Вимкнено(зруйноване)";
+                case DeviceState.Destroyed: return "Зруйноване";
+                default: return base.GetStatusName(state);
+            }
+        }
+        
         public override string CurrentStateDescription => CurrentState == DeviceState.Working ? "Ціле" : (CurrentState == DeviceState.Off ? "Зруйноване" : CurrentState.ToString());
         public override void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment) { }
         public override void Interact(ToolType tool, bool isElectricityOn, TimeSpan currentTime)
@@ -929,6 +1059,18 @@ namespace CourseWork
     public class DoorDevice : SmartDeviceBase
     {
         public DoorDevice(string name, string id, Room room, Point position, Size size, MainWindow mw) : base(name, id, room, position, size, mw) { CurrentState = DeviceState.Working; }
+        
+        protected override string GetStatusName(DeviceState state)
+        {
+            switch (state)
+            {
+                case DeviceState.Working: return "Ціле";
+                case DeviceState.Off: return "Вимкнено(зруйноване)";
+                case DeviceState.Destroyed: return "Зруйноване";
+                default: return base.GetStatusName(state);
+            }
+        }
+        
         public override string CurrentStateDescription => CurrentState == DeviceState.Working ? "Ціле" : (CurrentState == DeviceState.Off ? "Зруйноване" : CurrentState.ToString());
         public override void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment) { }
         public override void Interact(ToolType tool, bool isElectricityOn, TimeSpan currentTime)
@@ -943,18 +1085,30 @@ namespace CourseWork
         public int ActivationDurationInSimMinutes { get; set; } = 12;
         private TimeSpan _activeUntil; private bool _isManuallyOn = false;
         public MotionSensorLamp(string name, string id, Room room, Point position, Size size, MainWindow mw) : base(name, id, room, position, size, mw) { }
+        
+        protected override string GetStatusName(DeviceState state)
+        {
+            switch (state)
+            {
+                case DeviceState.Active: return "Активна(датчик руху)";
+                case DeviceState.Working: return "Працює(вручну)";
+                case DeviceState.Off: return "Вимкнена";
+                default: return base.GetStatusName(state);
+            }
+        }
+        
         public override string CurrentStateDescription { get { if (CurrentState == DeviceState.Active) return "Активна (датчик)"; if (CurrentState == DeviceState.Working) return "Працює (вручну)"; if (CurrentState == DeviceState.Off) return "Вимкнена"; return CurrentState.ToString(); } }
         public override void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment)
         {
             if (!isElectricityOn && CurrentState != DeviceState.Off) { TurnOff(); return; }
             bool canWorkByTime = (Name == "Л1" && (currentTime.Hours >= 16 || currentTime.Hours < 8)) || Name != "Л1";
             if (environment?.HasMotion == true && canWorkByTime && isElectricityOn)
-            { if (CurrentState != DeviceState.Active && CurrentState != DeviceState.Working) { CurrentState = DeviceState.Active; Log("Датчик руху спрацював."); } _activeUntil = currentTime.Add(TimeSpan.FromMinutes(ActivationDurationInSimMinutes)); environment.HasMotion = false; }
+            { if (CurrentState != DeviceState.Active && CurrentState != DeviceState.Working) { CurrentState = DeviceState.Active; } _activeUntil = currentTime.Add(TimeSpan.FromMinutes(ActivationDurationInSimMinutes)); environment.HasMotion = false; }
             if (CurrentState == DeviceState.Active && currentTime > _activeUntil && !_isManuallyOn) TurnOff();
             if (!canWorkByTime && Name == "Л1" && CurrentState != DeviceState.Off) TurnOff();
         }
-        public void TurnOn(bool isElectricityOn) { if (isElectricityOn) { CurrentState = DeviceState.Working; _isManuallyOn = true; Log("Увімкнено вручну."); } }
-        public void TurnOff() { if (CurrentState != DeviceState.Off) { CurrentState = DeviceState.Off; _isManuallyOn = false; Log("Вимкнено."); } }
+        public void TurnOn(bool isElectricityOn) { if (isElectricityOn) { CurrentState = DeviceState.Working; _isManuallyOn = true; } }
+        public void TurnOff() { if (CurrentState != DeviceState.Off) { CurrentState = DeviceState.Off; _isManuallyOn = false; } }
         public void ToggleState(bool isElectricityOn) { if (CurrentState == DeviceState.Off) TurnOn(isElectricityOn); else TurnOff(); }
         public override void Reset() { base.Reset(); _activeUntil = TimeSpan.Zero; _isManuallyOn = false; }
     }
@@ -963,56 +1117,171 @@ namespace CourseWork
     {
         public int ActivationDurationInSimMinutes { get; set; } = 30;
         private TimeSpan _activeUntil;
-        public CameraDevice(string name, string id, Room room, Point position, Size size, MainWindow mw) : base(name, id, room, position, size, mw) { }
+        public CameraDevice(string name, string id, Room room, Point position, Size size, MainWindow mw) : base(name, id, room, position, size, mw) { CurrentState = DeviceState.Working; }
+        
+        protected override string GetStatusName(DeviceState state)
+        {
+            switch (state)
+            {
+                case DeviceState.Active: return "Запис(датчик руху)";
+                case DeviceState.Working: return "Працює";
+                case DeviceState.Off: return "Вимкнена";
+                default: return base.GetStatusName(state);
+            }
+        }
+        
         public override string CurrentStateDescription => CurrentState == DeviceState.Active ? "Запис (датчик)" : (CurrentState == DeviceState.Working ? "Працює" : "Вимкнена");
         public override void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment)
         {
-            if (!isElectricityOn && CurrentState != DeviceState.Off) { CurrentState = DeviceState.Off; return; }
-            if (environment?.HasMotion == true && isElectricityOn)
-            { if (CurrentState != DeviceState.Active) Log("Почала запис через рух."); CurrentState = DeviceState.Active; _activeUntil = currentTime.Add(TimeSpan.FromMinutes(ActivationDurationInSimMinutes)); environment.HasMotion = false; }
-            if (CurrentState == DeviceState.Active && currentTime > _activeUntil) { CurrentState = DeviceState.Off; Log("Завершила запис."); }
+            // Камера працює від батареї при відсутності електроенергії
+            // Перевіряємо чи є живлення (електрика або батарея з зарядом)
+            if (!isElectricityOn && CurrentState != DeviceState.Off)
+            {
+                // Вимикаємо камеру - вона буде увімкнена знову якщо є батарея
+                CurrentState = DeviceState.Off;
+                return;
+            }
+            
+            // Якщо є живлення, камера працює
+            if (isElectricityOn || CurrentState == DeviceState.Working)
+            {
+                if (environment?.HasMotion == true)
+                { 
+                    if (CurrentState != DeviceState.Active) 
+                    { 
+                        CurrentState = DeviceState.Active; 
+                    } 
+                    _activeUntil = currentTime.Add(TimeSpan.FromMinutes(ActivationDurationInSimMinutes)); 
+                    environment.HasMotion = false; 
+                }
+                
+                if (CurrentState == DeviceState.Active && currentTime > _activeUntil) 
+                { 
+                    CurrentState = DeviceState.Working; 
+                }
+                
+                // Якщо камера була вимкнена але є живлення, вмикаємо
+                if (CurrentState == DeviceState.Off && isElectricityOn)
+                {
+                    CurrentState = DeviceState.Working;
+                }
+            }
         }
-        public override void Reset() { base.Reset(); _activeUntil = TimeSpan.Zero; }
+        public override void Reset() { base.Reset(); _activeUntil = TimeSpan.Zero; CurrentState = DeviceState.Working; }
     }
 
     public class FireSprinklerDevice : SmartDeviceBase
     {
-        private static readonly Random _randomInternalStatic = new Random(); // Ensure one instance for all sprinklers
+        private static readonly Random _randomInternalStatic = new Random();
         public double ActivationProbability { get; }
         public bool IsManuallyActivatable { get; }
         private readonly TimeSpan _activeDurationSim = TimeSpan.FromMinutes(6);
-        private TimeSpan _activeUntil; private TimeSpan _rechargeCompleteTime;
+        private TimeSpan _activeUntil; 
+        private TimeSpan _rechargeCompleteTime;
+        private TimeSpan _emptyWaterTime = TimeSpan.Zero;
         private const int RECHARGE_DURATION_SIM_MINUTES = 60;
+        private const int AUTO_RECHARGE_START_DELAY_MINUTES = 30;
         public FireSprinklerDevice(string name, string id, Room room, Point position, Size size, double probability, MainWindow mw, bool manual = false)
             : base(name, id, room, position, size, mw) { ActivationProbability = probability; IsManuallyActivatable = manual; CurrentState = DeviceState.Working; }
+        
+        protected override string GetStatusName(DeviceState state)
+        {
+            switch (state)
+            {
+                case DeviceState.Working: return "Готова(повна)";
+                case DeviceState.Active: return "Гасіння пожежі";
+                case DeviceState.EmptyWater: return "Пуста(немає води)";
+                case DeviceState.NeedsRecharge: return "Перезарядка";
+                case DeviceState.Off: return IsManuallyActivatable ? "Вимкнено(вручну)" : "Вимкнено";
+                default: return base.GetStatusName(state);
+            }
+        }
+        
         public override string CurrentStateDescription { get { switch (CurrentState) { case DeviceState.Working: return "Готова (повна)"; case DeviceState.Active: return "Гасіння пожежі"; case DeviceState.EmptyWater: return "Пуста (немає води)"; case DeviceState.NeedsRecharge: return "Перезарядка..."; case DeviceState.Off: return IsManuallyActivatable ? "Вимкнено (Вручну)" : "Вимкнено"; default: return CurrentState.ToString(); } } }
         public override void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment)
         {
             if (CurrentState == DeviceState.NeedsRecharge && currentTime >= _rechargeCompleteTime) Recharge();
+            
+            if (CurrentState == DeviceState.EmptyWater && currentTime >= _emptyWaterTime.Add(TimeSpan.FromMinutes(AUTO_RECHARGE_START_DELAY_MINUTES)))
+            {
+                StartRechargeCycle(currentTime);
+            }
+            
             if (CurrentState == DeviceState.Active && currentTime >= _activeUntil)
-            { CurrentState = DeviceState.EmptyWater; Log("Закінчилась вода."); if (environment?.HasFire == true) { Log($"НЕ ЗМІГ загасити пожежу в {environment.Name}! ВИКЛИК ПОЖЕЖНИКІВ!"); AssociatedRoom?.Devices.OfType<SirenDevice>().FirstOrDefault()?.Activate(currentTime); } else if (environment != null) Log($"Пожежу в {environment.Name} загашено."); }
+            { 
+                CurrentState = DeviceState.EmptyWater; 
+                _emptyWaterTime = currentTime;
+                if (environment?.HasFire == true) 
+                { 
+                    MainWindowContext?.LogEvent($"Пожежа в приміщенні {environment.Name} непогашена, виклик Пожежників");
+                    MainWindowContext?.StartAlarm();
+                } 
+            }
             if (CurrentState == DeviceState.Working && environment?.HasFire == true && !IsManuallyActivatable && isElectricityOn && _randomInternalStatic.NextDouble() < ActivationProbability) Activate(currentTime, environment);
         }
-        private void Activate(TimeSpan currentTime, Room environment) { CurrentState = DeviceState.Active; _activeUntil = currentTime + _activeDurationSim; if (environment != null) environment.HasFire = false; Log($"Активовано! Гасить пожежу в {environment?.Name ?? "невідомій зоні"}."); }
-        public void ActivateManual(TimeSpan currentTime) { if (CurrentState == DeviceState.Working) { CurrentState = DeviceState.Active; _activeUntil = currentTime + _activeDurationSim; if (AssociatedRoom != null) AssociatedRoom.HasFire = false; Log("Активовано вручну!"); } else Log("Неможливо активувати вручну (не готова або вже активна)."); }
-        public void Recharge() { if (CurrentState != DeviceState.Working) { CurrentState = DeviceState.Working; Log("Перезаряджено."); } }
-        public void StartRechargeCycle(TimeSpan currentTime) { if (CurrentState == DeviceState.EmptyWater || CurrentState == DeviceState.NotWorking) { CurrentState = DeviceState.NeedsRecharge; _rechargeCompleteTime = currentTime.Add(TimeSpan.FromMinutes(RECHARGE_DURATION_SIM_MINUTES)); Log($"Почав перезарядку. Готовність очікується о {_rechargeCompleteTime:T}."); } }
-        public override void Reset() { Recharge(); _activeUntil = TimeSpan.Zero; }
+        private void Activate(TimeSpan currentTime, Room environment) { CurrentState = DeviceState.Active; _activeUntil = currentTime + _activeDurationSim; if (environment != null) environment.HasFire = false; }
+        public void ActivateManual(TimeSpan currentTime) { if (CurrentState == DeviceState.Working) { CurrentState = DeviceState.Active; _activeUntil = currentTime + _activeDurationSim; if (AssociatedRoom != null) AssociatedRoom.HasFire = false; } }
+        public void Recharge() { if (CurrentState != DeviceState.Working) { CurrentState = DeviceState.Working; _emptyWaterTime = TimeSpan.Zero; } }
+        public void StartRechargeCycle(TimeSpan currentTime) { if (CurrentState == DeviceState.EmptyWater || CurrentState == DeviceState.NotWorking) { CurrentState = DeviceState.NeedsRecharge; _rechargeCompleteTime = currentTime.Add(TimeSpan.FromMinutes(RECHARGE_DURATION_SIM_MINUTES)); } }
+        public override void Reset() { Recharge(); _activeUntil = TimeSpan.Zero; _emptyWaterTime = TimeSpan.Zero; }
         public override void Interact(ToolType tool, bool isElectricityOn, TimeSpan currentTime) { if (CurrentState == DeviceState.EmptyWater || CurrentState == DeviceState.NotWorking) StartRechargeCycle(currentTime); else if (IsManuallyActivatable && CurrentState == DeviceState.Working && isElectricityOn) ActivateManual(currentTime); }
     }
 
     public class ThermostatDevice : SmartDeviceBase, IOnOffToggleable
     {
         private double _targetTemperature = 22;
-        public double TargetTemperature { get => _targetTemperature; set { _targetTemperature = Math.Max(16, Math.Min(28, value)); OnPropertyChanged(); Log($"Цільова температура змінена на {value:F1}°C"); } }
+        public double TargetTemperature 
+        { 
+            get => _targetTemperature; 
+            set 
+            { 
+                if (Math.Abs(_targetTemperature - value) > 0.01)
+                {
+                    _targetTemperature = Math.Max(16, Math.Min(28, value)); 
+                    OnPropertyChanged();
+                    string roomName = AssociatedRoom?.Name ?? "невідома область";
+                    if (roomName == "Спальня 1" || roomName == "Спальня 2" || roomName == "Вітальня")
+                    {
+                        MainWindowContext?.LogEvent($"В області приміщення {roomName} бажане значення температури в термостаті було змінено на {_targetTemperature:F1}°C");
+                    }
+                }
+            } 
+        }
         private int _targetHumidity = 50;
-        public int TargetHumidity { get => _targetHumidity; set { _targetHumidity = (int)Math.Max(20, Math.Min(80, value)); OnPropertyChanged(); Log($"Цільова вологість змінена на {value}%"); } }
+        public int TargetHumidity 
+        { 
+            get => _targetHumidity; 
+            set 
+            { 
+                if (_targetHumidity != value)
+                {
+                    _targetHumidity = (int)Math.Max(20, Math.Min(80, value)); 
+                    OnPropertyChanged();
+                    string roomName = AssociatedRoom?.Name ?? "невідома область";
+                    if (roomName == "Спальня 1" || roomName == "Спальня 2" || roomName == "Вітальня")
+                    {
+                        MainWindowContext?.LogEvent($"В області приміщення {roomName} бажане значення вологості в термостаті було змінено на {_targetHumidity}%");
+                    }
+                }
+            } 
+        }
         public ThermostatDevice(string name, string id, Room room, Point position, Size size, MainWindow mw) : base(name, id, room, position, size, mw) { CurrentState = DeviceState.Working; }
+        
+        protected override string GetStatusName(DeviceState state)
+        {
+            switch (state)
+            {
+                case DeviceState.Working: return "Працює";
+                case DeviceState.Off: return "Вимкнено";
+                default: return base.GetStatusName(state);
+            }
+        }
+        
         public override string CurrentStateDescription => CurrentState == DeviceState.Working ? $"Працює (ціль: {TargetTemperature:F1}°C, {TargetHumidity}%)" : "Вимкнено";
         public override void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment)
         { if (!isElectricityOn && CurrentState == DeviceState.Working) TurnOff(); else if (isElectricityOn && CurrentState == DeviceState.Off) TurnOn(true); }
-        public void TurnOn(bool isElectricityOn) { if (isElectricityOn && CurrentState != DeviceState.Working) { CurrentState = DeviceState.Working; Log("Увімкнено."); } }
-        public void TurnOff() { if (CurrentState != DeviceState.Off) { CurrentState = DeviceState.Off; Log("Вимкнено."); } }
+        public void TurnOn(bool isElectricityOn) { if (isElectricityOn && CurrentState != DeviceState.Working) { CurrentState = DeviceState.Working; } }
+        public void TurnOff() { if (CurrentState != DeviceState.Off) { CurrentState = DeviceState.Off; } }
         public void ToggleState(bool isElectricityOn) { if (CurrentState == DeviceState.Off) TurnOn(isElectricityOn); else TurnOff(); }
         public override void Reset() { base.Reset(); TargetTemperature = 22; TargetHumidity = 50; CurrentState = DeviceState.Working; }
     }
@@ -1030,25 +1299,87 @@ namespace CourseWork
     {
         public HeaterDevice(string name, string id, Room room, Point position, Size size, MainWindow mw) : base(name, id, room, position, size, mw) { }
         public override void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment)
-        { if (!isElectricityOn) { if (CurrentState != DeviceState.Off) TurnOff(); return; } var thermostat = environment?.Devices.OfType<ThermostatDevice>().FirstOrDefault(t => t.CurrentState == DeviceState.Working); if (thermostat != null && environment != null) { if (environment.CurrentTemperature < thermostat.TargetTemperature) { if (CurrentState == DeviceState.Off) TurnOn(isElectricityOn); } else { if (CurrentState == DeviceState.Working) TurnOff(); } } else if (CurrentState == DeviceState.Working) TurnOff(); }
+        { 
+            if (!isElectricityOn) { if (CurrentState != DeviceState.Off) TurnOff(); return; } 
+            var thermostat = environment?.Devices.OfType<ThermostatDevice>().FirstOrDefault(t => t.CurrentState == DeviceState.Working); 
+            if (thermostat != null && environment != null) 
+            { 
+                int targetTemp = (int)Math.Round(thermostat.TargetTemperature);
+                if (environment.CurrentTemperature < targetTemp) 
+                { 
+                    if (CurrentState == DeviceState.Off) TurnOn(isElectricityOn); 
+                } 
+                else if (environment.CurrentTemperature >= targetTemp)
+                { 
+                    if (CurrentState == DeviceState.Working) TurnOff(); 
+                } 
+            } 
+            else if (CurrentState == DeviceState.Working) TurnOff(); 
+        }
     }
     public class ConditionerDevice : ClimateControlUnit
     {
         public ConditionerDevice(string name, string id, Room room, Point position, Size size, MainWindow mw) : base(name, id, room, position, size, mw) { }
         public override void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment)
-        { if (!isElectricityOn) { if (CurrentState != DeviceState.Off) TurnOff(); return; } var thermostat = environment?.Devices.OfType<ThermostatDevice>().FirstOrDefault(t => t.CurrentState == DeviceState.Working); if (thermostat != null && environment != null) { if (environment.CurrentTemperature > thermostat.TargetTemperature) { if (CurrentState == DeviceState.Off) TurnOn(isElectricityOn); } else { if (CurrentState == DeviceState.Working) TurnOff(); } } else if (CurrentState == DeviceState.Working) TurnOff(); }
+        { 
+            if (!isElectricityOn) { if (CurrentState != DeviceState.Off) TurnOff(); return; } 
+            var thermostat = environment?.Devices.OfType<ThermostatDevice>().FirstOrDefault(t => t.CurrentState == DeviceState.Working); 
+            if (thermostat != null && environment != null) 
+            { 
+                int targetTemp = (int)Math.Round(thermostat.TargetTemperature);
+                if (environment.CurrentTemperature > targetTemp) 
+                { 
+                    if (CurrentState == DeviceState.Off) TurnOn(isElectricityOn); 
+                } 
+                else if (environment.CurrentTemperature <= targetTemp)
+                { 
+                    if (CurrentState == DeviceState.Working) TurnOff(); 
+                } 
+            } 
+            else if (CurrentState == DeviceState.Working) TurnOff(); 
+        }
     }
     public class HumidifierDevice : ClimateControlUnit
     {
         public HumidifierDevice(string name, string id, Room room, Point position, Size size, MainWindow mw) : base(name, id, room, position, size, mw) { }
         public override void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment)
-        { if (!isElectricityOn) { if (CurrentState != DeviceState.Off) TurnOff(); return; } var thermostat = environment?.Devices.OfType<ThermostatDevice>().FirstOrDefault(t => t.CurrentState == DeviceState.Working); if (thermostat != null && environment != null) { if (environment.CurrentHumidity < thermostat.TargetHumidity) { if (CurrentState == DeviceState.Off) TurnOn(isElectricityOn); } else { if (CurrentState == DeviceState.Working) TurnOff(); } } else if (CurrentState == DeviceState.Working) TurnOff(); }
+        { 
+            if (!isElectricityOn) { if (CurrentState != DeviceState.Off) TurnOff(); return; } 
+            var thermostat = environment?.Devices.OfType<ThermostatDevice>().FirstOrDefault(t => t.CurrentState == DeviceState.Working); 
+            if (thermostat != null && environment != null) 
+            { 
+                if (environment.CurrentHumidity < thermostat.TargetHumidity) 
+                { 
+                    if (CurrentState == DeviceState.Off) TurnOn(isElectricityOn); 
+                } 
+                else if (environment.CurrentHumidity >= thermostat.TargetHumidity)
+                { 
+                    if (CurrentState == DeviceState.Working) TurnOff(); 
+                } 
+            } 
+            else if (CurrentState == DeviceState.Working) TurnOff(); 
+        }
     }
     public class DehumidifierDevice : ClimateControlUnit
     {
         public DehumidifierDevice(string name, string id, Room room, Point position, Size size, MainWindow mw) : base(name, id, room, position, size, mw) { }
         public override void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment)
-        { if (!isElectricityOn) { if (CurrentState != DeviceState.Off) TurnOff(); return; } var thermostat = environment?.Devices.OfType<ThermostatDevice>().FirstOrDefault(t => t.CurrentState == DeviceState.Working); if (thermostat != null && environment != null) { if (environment.CurrentHumidity > thermostat.TargetHumidity) { if (CurrentState == DeviceState.Off) TurnOn(isElectricityOn); } else { if (CurrentState == DeviceState.Working) TurnOff(); } } else if (CurrentState == DeviceState.Working) TurnOff(); }
+        { 
+            if (!isElectricityOn) { if (CurrentState != DeviceState.Off) TurnOff(); return; } 
+            var thermostat = environment?.Devices.OfType<ThermostatDevice>().FirstOrDefault(t => t.CurrentState == DeviceState.Working); 
+            if (thermostat != null && environment != null) 
+            { 
+                if (environment.CurrentHumidity > thermostat.TargetHumidity) 
+                { 
+                    if (CurrentState == DeviceState.Off) TurnOn(isElectricityOn); 
+                } 
+                else if (environment.CurrentHumidity <= thermostat.TargetHumidity)
+                { 
+                    if (CurrentState == DeviceState.Working) TurnOff(); 
+                } 
+            } 
+            else if (CurrentState == DeviceState.Working) TurnOff(); 
+        }
     }
 
     public class ChandelierDevice : SmartDeviceBase, IOnOffToggleable
@@ -1066,7 +1397,7 @@ namespace CourseWork
         public bool IsHumidityControlled { get; }
         private const int HUMIDITY_THRESHOLD_VE1 = 60;
         public FanDevice(string name, string id, Room room, Point position, Size size, MainWindow mw, bool humidityControlled = false) : base(name, id, room, position, size, mw) { IsHumidityControlled = humidityControlled; }
-        public override string CurrentStateDescription => CurrentState == DeviceState.Working ? "Працює" : "Вимкнено";
+        public override string CurrentStateDescription => CurrentState == DeviceState.Working ? "Працює" : "Вимкнена";
         public override void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment)
         { if (!isElectricityOn && CurrentState == DeviceState.Working) { TurnOff(); return; } if (IsHumidityControlled && environment != null) { if (environment.CurrentHumidity > HUMIDITY_THRESHOLD_VE1) { if (CurrentState == DeviceState.Off && isElectricityOn) TurnOn(isElectricityOn); } else { if (CurrentState == DeviceState.Working) TurnOff(); } } }
         public void TurnOn(bool isElectricityOn) { if (isElectricityOn && CurrentState != DeviceState.Working) { CurrentState = DeviceState.Working; Log("Увімкнено."); } }
@@ -1075,33 +1406,145 @@ namespace CourseWork
         public void ActivateManual(bool isElectricityOn) { if (isElectricityOn && CurrentState != DeviceState.Working) { CurrentState = DeviceState.Working; Log("Активовано (плита)."); } }
     }
 
-    public class SolarPanelDevice : SmartDeviceBase
+    public class SolarPanelDevice : SmartDeviceBase, IOnOffToggleable
     {
+        private bool _isManuallyDisabled = false;
+        
         public SolarPanelDevice(string name, string id, Room room, Point position, Size size, MainWindow mw) : base(name, id, room, position, size, mw) { }
-        public override string CurrentStateDescription => CurrentState == DeviceState.Working ? "Генерація енергії" : "Неактивні";
+        
+        public override string CurrentStateDescription => CurrentState == DeviceState.Working ? "Генерація енергії" : (_isManuallyDisabled ? "Вимкнені вручну" : "Неактивні");
+        
         public override void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment)
-        { DeviceState prevState = CurrentState; if (currentTime.Hours >= 8 && currentTime.Hours < 16) CurrentState = DeviceState.Working; else CurrentState = DeviceState.Off; if (prevState != CurrentState) Log(CurrentState == DeviceState.Working ? "Почали генерацію." : "Припинили генерацію."); }
+        { 
+            DeviceState prevState = CurrentState; 
+            
+            // Якщо вимкнені вручну, не працюють незалежно від часу
+            if (_isManuallyDisabled)
+            {
+                if (CurrentState != DeviceState.Off)
+                {
+                    CurrentState = DeviceState.Off;
+                    if (prevState != CurrentState) Log("Вимкнені вручну.");
+                }
+                return;
+            }
+            
+            // Автоматичний режим: працюють з 8:00 до 16:00
+            if (currentTime.Hours >= 8 && currentTime.Hours < 16) 
+                CurrentState = DeviceState.Working; 
+            else 
+                CurrentState = DeviceState.Off; 
+                
+            if (prevState != CurrentState) 
+                Log(CurrentState == DeviceState.Working ? "Почали генерацію." : "Припинили генерацію."); 
+        }
+        
+        public void TurnOn(bool isElectricityOn) 
+        { 
+            if (_isManuallyDisabled)
+            {
+                _isManuallyDisabled = false; 
+                Log("Увімкнені вручну (автоматичний режим).");
+            }
+        }
+        
+        public void TurnOff() 
+        { 
+            if (!_isManuallyDisabled)
+            {
+                _isManuallyDisabled = true; 
+                CurrentState = DeviceState.Off;
+                Log("Вимкнені вручну.");
+            }
+        }
+        
+        public void ToggleState(bool isElectricityOn) 
+        { 
+            if (_isManuallyDisabled) 
+                TurnOn(isElectricityOn); 
+            else 
+                TurnOff(); 
+        }
+        
+        public override void Reset() 
+        { 
+            base.Reset(); 
+            _isManuallyDisabled = false; 
+        }
     }
 
     public class SirenDevice : SmartDeviceBase
     {
-        private readonly TimeSpan _activationDurationSim = TimeSpan.FromMinutes(30); private TimeSpan _activeUntil;
+        private readonly TimeSpan _activationDurationSim = TimeSpan.FromMinutes(30); 
+        private TimeSpan _activeUntil;
+        private bool _wasActivatedByBreach = false;
+        
         public SirenDevice(string name, string id, Room room, Point position, Size size, MainWindow mw) : base(name, id, room, position, size, mw) { }
+        
+        protected override string GetStatusName(DeviceState state)
+        {
+            switch (state)
+            {
+                case DeviceState.Active: return "АКТИВНА";
+                case DeviceState.Off: return "Вимкнена";
+                default: return base.GetStatusName(state);
+            }
+        }
+        
         public override string CurrentStateDescription => CurrentState == DeviceState.Active ? "СИРЕНА АКТИВНА!" : "Вимкнена";
-        public override void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment) { if (CurrentState == DeviceState.Active && currentTime > _activeUntil) { CurrentState = DeviceState.Off; Log("Вимкнулась."); } }
-        public void Activate(TimeSpan currentTime) { if (CurrentState != DeviceState.Active) { CurrentState = DeviceState.Active; _activeUntil = currentTime + _activationDurationSim; Log("!!! УВІМКНЕНА !!!"); } }
-        public override void Reset() { base.Reset(); _activeUntil = TimeSpan.Zero; }
+        
+        public override void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment) 
+        { 
+            if (CurrentState == DeviceState.Active && currentTime > _activeUntil) 
+            { 
+                CurrentState = DeviceState.Off; 
+                _wasActivatedByBreach = false;
+            } 
+        }
+        
+        public void Activate(TimeSpan currentTime) 
+        { 
+            if (CurrentState != DeviceState.Active) 
+            { 
+                CurrentState = DeviceState.Active; 
+                _activeUntil = currentTime + _activationDurationSim;
+                _wasActivatedByBreach = true;
+                MainWindowContext?.LogEvent("Виклик Поліції");
+                MainWindowContext?.StartAlarm();
+            } 
+        }
+        
+        public override void Reset() { base.Reset(); _activeUntil = TimeSpan.Zero; _wasActivatedByBreach = false; }
     }
 
     public class BatteryDevice : SmartDeviceBase
     {
         public double ChargeLevel { get; private set; } = 100.0;
-        public bool IsCharging { get; set; } = false; public bool IsDischarging { get; set; } = false;
-        private const double DISCHARGE_RATE_PER_SIM_MINUTE_EQUIVALENT = 0.5 * (6.0 / MainWindow.UPDATE_INTERVAL_SECONDS); // % per sim minute, adjusted for update rate
+        public bool IsCharging { get; set; } = false; 
+        public bool IsDischarging { get; set; } = false;
+        public int ActiveDeviceCount { get; set; } = 0;
+        
+        // Базова швидкість розрядження + додатково за кожен активний пристрій
+        private const double BASE_DISCHARGE_RATE = 0.3;
+        private const double DISCHARGE_PER_DEVICE = 0.15;
         private const double CHARGE_RATE_PER_SIM_MINUTE_EQUIVALENT = 1.0 * (6.0 / MainWindow.UPDATE_INTERVAL_SECONDS);
+        
         private bool _isEffectivelyPowering = false;
-        public BatteryDevice(string name, string id, Room room, Point position, Size size, MainWindow mw) : base(name, id, room, position, size, mw) { CurrentState = DeviceState.Working; }
-        public override string CurrentStateDescription => $"Резерв: {ChargeLevel:F0}%" + (CurrentState == DeviceState.Charging ? " (Зарядка)" : (_isEffectivelyPowering ? " (Живлення)" : " (Готова)"));
+        private bool _lastLoggedFullyCharged = false;
+        private bool _wasCharging = false;
+        private bool _wasDischarging = false;
+        private double _lastLoggedChargeLevel = 100.0; // Для відстеження змін заряду
+        
+        public BatteryDevice(string name, string id, Room room, Point position, Size size, MainWindow mw) 
+            : base(name, id, room, position, size, mw) 
+        { 
+            CurrentState = DeviceState.Working; 
+        }
+        
+        public override string CurrentStateDescription => $"Резерв: {ChargeLevel:F0}%" + 
+            (CurrentState == DeviceState.Charging ? " (Зарядка)" : 
+            (_isEffectivelyPowering ? $" (Живлення {ActiveDeviceCount} прист.)" : " (Готова)"));
+        
         public override void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment)
         {
             _isEffectivelyPowering = IsDischarging && ChargeLevel > 0 && !isElectricityOn;
@@ -1109,21 +1552,115 @@ namespace CourseWork
             double elapsedSimMinutes = MainWindow.UPDATE_INTERVAL_SECONDS * 60 * MainWindow.SIMULATION_SPEED_FACTOR;
 
             if (IsCharging && ChargeLevel < 100.0)
-            { ChargeLevel = Math.Min(100.0, ChargeLevel + CHARGE_RATE_PER_SIM_MINUTE_EQUIVALENT * elapsedSimMinutes); CurrentState = DeviceState.Charging; }
+            { 
+                // Логуємо початок зарядки
+                if (!_wasCharging)
+                {
+                    Log($"Почала зарядку. Поточний заряд: {ChargeLevel:F0}%");
+                    _wasCharging = true;
+                    _wasDischarging = false;
+                    _lastLoggedChargeLevel = ChargeLevel;
+                }
+                
+                double oldCharge = ChargeLevel;
+                ChargeLevel = Math.Min(100.0, ChargeLevel + CHARGE_RATE_PER_SIM_MINUTE_EQUIVALENT * elapsedSimMinutes); 
+                
+                // Логуємо кожні 5% зміни заряду під час зарядки
+                if (Math.Floor(ChargeLevel / 5) > Math.Floor(_lastLoggedChargeLevel / 5))
+                {
+                    Log($"Зарядка: {ChargeLevel:F0}%");
+                    _lastLoggedChargeLevel = ChargeLevel;
+                }
+                
+                CurrentState = DeviceState.Charging;
+                _lastLoggedFullyCharged = false;
+            }
             else if (IsDischarging && ChargeLevel > 0 && !isElectricityOn)
-            { ChargeLevel = Math.Max(0, ChargeLevel - DISCHARGE_RATE_PER_SIM_MINUTE_EQUIVALENT * elapsedSimMinutes); CurrentState = (ChargeLevel > 0) ? DeviceState.Working : DeviceState.EmptyWater; }
-            else if (ChargeLevel >= 100 && IsCharging) { IsCharging = false; CurrentState = DeviceState.Working; Log("Повністю заряджена."); }
-            else if (isElectricityOn && CurrentState != DeviceState.Charging) CurrentState = DeviceState.Working;
+            { 
+                // Логуємо початок розрядження
+                if (!_wasDischarging)
+                {
+                    Log($"Почала розрядження (живлення {ActiveDeviceCount} критичних пристроїв). Поточний заряд: {ChargeLevel:F0}%");
+                    _wasDischarging = true;
+                    _wasCharging = false;
+                    _lastLoggedChargeLevel = ChargeLevel;
+                }
+                
+                double oldCharge = ChargeLevel;
+                // Розраховуємо швидкість розрядження на основі кількості активних пристроїв
+                double dischargeRate = (BASE_DISCHARGE_RATE + (ActiveDeviceCount * DISCHARGE_PER_DEVICE)) * (6.0 / MainWindow.UPDATE_INTERVAL_SECONDS);
+                ChargeLevel = Math.Max(0, ChargeLevel - dischargeRate * elapsedSimMinutes); 
+                
+                // Логуємо кожні 5% зміни заряду під час розрядження
+                if (Math.Floor(_lastLoggedChargeLevel / 5) > Math.Floor(ChargeLevel / 5))
+                {
+                    Log($"Розрядження: {ChargeLevel:F0}% (живлення {ActiveDeviceCount} пристроїв)");
+                    _lastLoggedChargeLevel = ChargeLevel;
+                }
+                
+                CurrentState = (ChargeLevel > 0) ? DeviceState.Working : DeviceState.EmptyWater;
+            }
+            else if (ChargeLevel >= 100.0 && IsCharging) 
+            { 
+                IsCharging = false; 
+                CurrentState = DeviceState.Working; 
+                
+                // Логуємо "Повністю заряджена" тільки один раз
+                if (!_lastLoggedFullyCharged)
+                {
+                    Log("Повністю заряджена: 100%");
+                    _lastLoggedFullyCharged = true;
+                    _wasCharging = false;
+                }
+            }
+            else if (isElectricityOn && CurrentState != DeviceState.Charging) 
+            {
+                // Коли електрика увімкнена, а зарядка/розрядка припинилася
+                if (_wasDischarging)
+                {
+                    Log($"Припинила розрядження. Залишок заряду: {ChargeLevel:F0}%");
+                    _wasDischarging = false;
+                }
+                CurrentState = DeviceState.Working;
+            }
+            else
+            {
+                // Скидаємо прапорці якщо не заряджаємо і не розряджаємо
+                if (!IsCharging && _wasCharging)
+                {
+                    _wasCharging = false;
+                }
+                if (!IsDischarging && _wasDischarging)
+                {
+                    _wasDischarging = false;
+                }
+            }
 
-            if (ChargeLevel <= 0 && CurrentState != DeviceState.EmptyWater) { CurrentState = DeviceState.EmptyWater; Log("Розряджена."); }
-            if (ChargeLevel > 0 && CurrentState == DeviceState.EmptyWater && isElectricityOn) CurrentState = DeviceState.Working; // Can recover if power returns and has some charge
-
-            if (prevState != CurrentState && CurrentState == DeviceState.Charging && prevState != DeviceState.Charging) Log("Почала зарядку.");
-            if (prevState == DeviceState.Charging && CurrentState == DeviceState.Working && ChargeLevel >= 100) { /* Logged above */ }
-            else if (prevState != DeviceState.Working && CurrentState == DeviceState.Working && _isEffectivelyPowering) Log("Почала живити будинок.");
-            else if (prevState == DeviceState.Working && CurrentState == DeviceState.Working && !_isEffectivelyPowering && isElectricityOn) { /* Standby */ }
+            if (ChargeLevel <= 0 && CurrentState != DeviceState.EmptyWater) 
+            { 
+                CurrentState = DeviceState.EmptyWater; 
+                Log("Розряджена: 0%");
+                _wasDischarging = false;
+            }
+            
+            if (ChargeLevel > 0 && CurrentState == DeviceState.EmptyWater && (isElectricityOn || IsCharging)) 
+            {
+                CurrentState = DeviceState.Working;
+            }
         }
-        public override void Reset() { ChargeLevel = 100.0; CurrentState = DeviceState.Working; IsCharging = false; IsDischarging = false; }
+        
+        public override void Reset() 
+        { 
+            ChargeLevel = 100.0; 
+            CurrentState = DeviceState.Working; 
+            IsCharging = false; 
+            IsDischarging = false; 
+            ActiveDeviceCount = 0;
+            _lastLoggedFullyCharged = false;
+            _wasCharging = false;
+            _wasDischarging = false;
+            _lastLoggedChargeLevel = 100.0;
+        }
     }
 
     public class ManualSwitchDevice : SmartDeviceBase
@@ -1140,31 +1677,72 @@ namespace CourseWork
     {
         public StoveDevice(string name, string id, Room room, Point position, Size size, MainWindow mw) : base(name, id, room, position, size, mw) { }
         public override string CurrentStateDescription => CurrentState == DeviceState.Working ? "Готує" : "Вимкнена";
-        public override void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment) { if (!isElectricityOn && CurrentState == DeviceState.Working) TurnOff(); }
-        public void TurnOn(bool isElectricityOn) { if (isElectricityOn && CurrentState != DeviceState.Working) { CurrentState = DeviceState.Working; Log("Увімкнено."); } }
+        public override void UpdateState(TimeSpan currentTime, bool isElectricityOn, Room environment) 
+        { 
+            // Плита є газовою і працює без електроенергії
+        }
+        public void TurnOn(bool isElectricityOn) 
+        { 
+            // Плита може працювати без електроенергії
+            if (CurrentState != DeviceState.Working) 
+            { 
+                CurrentState = DeviceState.Working; 
+                Log("Увімкнено."); 
+            } 
+        }
         public void TurnOff() { if (CurrentState != DeviceState.Off) { CurrentState = DeviceState.Off; Log("Вимкнено."); } }
         public void ToggleState(bool isElectricityOn) { if (CurrentState == DeviceState.Off) TurnOn(isElectricityOn); else TurnOff(); }
     }
 
     public class Room : INotifyPropertyChanged
     {
-        private readonly MainWindow _mainWindowContext; // Renamed for clarity
+        private readonly MainWindow _mainWindowContext;
         public string Name { get; }
         public Rect AreaRect { get; }
         public List<SmartDeviceBase> Devices { get; } = new List<SmartDeviceBase>();
-        private double _currentTemperature;
-        public double CurrentTemperature { get => _currentTemperature; set { _currentTemperature = value; OnPropertyChanged(); } }
-        public double DefaultTemperature { get; set; } = 20;
+        private int _currentTemperature;
+        public int CurrentTemperature { get => _currentTemperature; set { _currentTemperature = value; OnPropertyChanged(); } }
+        public int DefaultTemperature { get; set; } = 20;
         private int _currentHumidity;
         public int CurrentHumidity { get => _currentHumidity; set { _currentHumidity = value; OnPropertyChanged(); } }
         public int DefaultHumidity { get; set; } = 50;
         private bool _hasFire;
-        public bool HasFire { get => _hasFire; set { if (_hasFire != value) { _hasFire = value; OnPropertyChanged(); if (value) _mainWindowContext.LogEvent($"ПОЖЕЖА в {Name}!"); else _mainWindowContext.LogEvent($"Пожежу в {Name} ліквідовано."); } } }
+        public bool HasFire 
+        { 
+            get => _hasFire; 
+            set 
+            { 
+                if (_hasFire != value) 
+                { 
+                    _hasFire = value; 
+                    OnPropertyChanged(); 
+                    if (value) 
+                        _mainWindowContext.LogEvent($"В області приміщення {Name} виникла пожежа");
+                    else 
+                        _mainWindowContext.LogEvent($"Пожежу в області приміщення {Name} погашено");
+                } 
+            } 
+        }
         private bool _hasMotion;
         public bool HasMotion { get => _hasMotion; set { _hasMotion = value; OnPropertyChanged(); } }
         public TimeSpan MotionEndTime { get; set; }
         private bool _isBreached;
-        public bool IsBreached { get => _isBreached; set { if (_isBreached != value) { _isBreached = value; OnPropertyChanged(); if (value) _mainWindowContext.LogEvent($"ВЗЛОМ в {Name}!"); else _mainWindowContext.LogEvent($"Загрозу взлому в {Name} усунуто."); } } }
+        public bool IsBreached 
+        { 
+            get => _isBreached; 
+            set 
+            { 
+                if (_isBreached != value) 
+                { 
+                    _isBreached = value; 
+                    OnPropertyChanged(); 
+                    if (value) 
+                        _mainWindowContext.LogEvent($"В області приміщення {Name} виявлено взлом");
+                    else 
+                        _mainWindowContext.LogEvent($"Загрозу взлому в області приміщення {Name} усунуто");
+                } 
+            } 
+        }
 
         public Room(string name, Rect areaRect, MainWindow mainWindow)
         { Name = name; AreaRect = areaRect; _mainWindowContext = mainWindow; CurrentTemperature = DefaultTemperature; CurrentHumidity = DefaultHumidity; }
@@ -1179,7 +1757,7 @@ namespace CourseWork
                 double tempChange = 0;
                 foreach (var heater in Devices.OfType<HeaterDevice>().Where(d => d.CurrentState == DeviceState.Working)) tempChange += 1;
                 foreach (var conditioner in Devices.OfType<ConditionerDevice>().Where(d => d.CurrentState == DeviceState.Working)) tempChange -= 1;
-                CurrentTemperature = Math.Round(Math.Max(0, Math.Min(50, CurrentTemperature + tempChange)), 1);
+                CurrentTemperature = (int)Math.Round(Math.Max(-273, CurrentTemperature + tempChange));
 
                 double humidityChange = 0;
                 foreach (var humidifier in Devices.OfType<HumidifierDevice>().Where(d => d.CurrentState == DeviceState.Working)) humidityChange += 1;
@@ -1231,7 +1809,7 @@ namespace CourseWork
 
     public class DeviceStateToActionTextConverter : IValueConverter
     {
-        public object Convert(object value, Type targetType, object parameter, CultureInfo culture) { if (!(value is DeviceState state) || !(parameter is string actionNumber)) return null; if (actionNumber == "Action1") { switch (state) { case DeviceState.Off: case DeviceState.Inactive: return "Увімк."; case DeviceState.Working: case DeviceState.Active: return "Вимк."; case DeviceState.Destroyed: return "Полаг."; case DeviceState.EmptyWater: case DeviceState.NotWorking: return "Перезар."; case DeviceState.NeedsRecharge: return "Зарядка..."; case DeviceState.Charging: return "Зарядка..."; } } return null; }
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture) { if (!(value is DeviceState state) || !(parameter is string actionNumber)) return null; if (actionNumber == "Action1") { switch (state) { case DeviceState.Off: case DeviceState.Inactive: return "Увімк."; case DeviceState.Working: case DeviceState.Active: return "Вимк."; case DeviceState.Destroyed: return "Полаг."; case DeviceState.EmptyWater: return "Перезар."; case DeviceState.NeedsRecharge: return "Зарядка..."; case DeviceState.Charging: return "Зарядка..."; } } return null; }
         public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => throw new NotImplementedException();
     }
 

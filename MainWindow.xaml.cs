@@ -373,7 +373,9 @@ namespace CourseWork
 
             foreach (var device in _allDevices)
             {
-                device.UpdateState(CurrentSimTime, effectivePower, device.AssociatedRoom);
+                // Pass grid power to BatteryDevice to allow correct charge/discharge decisions
+                bool powerFlag = (device is BatteryDevice) ? IsElectricityOn : effectivePower;
+                device.UpdateState(CurrentSimTime, powerFlag, device.AssociatedRoom);
                 if (device is StoveDevice stove && stove.CurrentState == DeviceState.Working)
                     _allDevices.OfType<FanDevice>().FirstOrDefault(f => f.Id == "F002")?.ActivateManual(effectivePower);
             }
@@ -384,12 +386,35 @@ namespace CourseWork
         {
             bool hasSolarPower = _allDevices.OfType<SolarPanelDevice>().Any(p => p.CurrentState == DeviceState.Working);
             var mainBattery = _allDevices.OfType<BatteryDevice>().FirstOrDefault();
-            bool batteryHasPower = mainBattery?.CurrentState == DeviceState.Working && mainBattery.ChargeLevel > 0;
+            bool batteryHasPower = mainBattery != null && mainBattery.ChargeLevel > 0;
+            bool batteryPoweringDevices = !IsElectricityOn && !hasSolarPower && batteryHasPower;
+
+            // Recalculate active critical devices when toggling power
+            int activeCriticalDevices = 0;
+            if (batteryPoweringDevices)
+            {
+                activeCriticalDevices += _allDevices.OfType<CameraDevice>().Count(d => d.CurrentState != DeviceState.Off);
+                activeCriticalDevices += _allDevices.OfType<FireSprinklerDevice>().Count(d => d.CurrentState == DeviceState.Working || d.CurrentState == DeviceState.Active);
+                activeCriticalDevices += _allDevices.OfType<SirenDevice>().Count(d => d.CurrentState == DeviceState.Active);
+                activeCriticalDevices += _allDevices.OfType<WindowDevice>().Count(d => d.CurrentState == DeviceState.Working);
+                activeCriticalDevices += _allDevices.OfType<DoorDevice>().Count(d => d.CurrentState == DeviceState.Working);
+                activeCriticalDevices += _allDevices.OfType<ThermostatDevice>().Count(d => d.CurrentState == DeviceState.Working);
+                activeCriticalDevices += _allDevices.OfType<FanDevice>().Count(d => d.CurrentState == DeviceState.Working);
+            }
+
+            if (mainBattery != null)
+            {
+                mainBattery.IsDischarging = batteryPoweringDevices;
+                mainBattery.IsCharging = (IsElectricityOn || hasSolarPower) && mainBattery.ChargeLevel < 100.0;
+                mainBattery.ActiveDeviceCount = activeCriticalDevices;
+            }
+
             bool effectivePower = IsElectricityOn || hasSolarPower || (!IsElectricityOn && batteryHasPower);
 
             foreach (var device in _allDevices)
             {
-                device.UpdateState(CurrentSimTime, effectivePower, device.AssociatedRoom);
+                bool powerFlag = (device is BatteryDevice) ? IsElectricityOn : effectivePower;
+                device.UpdateState(CurrentSimTime, powerFlag, device.AssociatedRoom);
             }
             SelectedRoomInfo?.Refresh();
         }
@@ -397,13 +422,23 @@ namespace CourseWork
 
         private void ChangeTime_Click(object sender, RoutedEventArgs e)
         {
-            var newTimeStr = ShowInputDialog("Введіть новий час (ГГ:ХХ):", "Зміна часу");
-            if (TimeSpan.TryParse(newTimeStr, out TimeSpan newTime))
+            var newTimeStr = ShowInputDialog("Введіть новий час (ГГ:ХХ або ГГ ХХ):", "Зміна часу");
+
+            if (!string.IsNullOrWhiteSpace(newTimeStr))
             {
-                CurrentSimTime = newTime;
-                LogEvent($"Час змінено на {newTimeStr}");
+                // Normalize input: allow either colon or space between hours and minutes
+                string normalized = newTimeStr.Trim();
+                normalized = Regex.Replace(normalized, "\\s+", ":"); // replace any whitespace with a colon
+
+                if (TimeSpan.TryParse(normalized, out TimeSpan newTime))
+                {
+                    CurrentSimTime = newTime;
+                    LogEvent($"Час змінено на {newTime:hh\\:mm}");
+                    return;
+                }
             }
-            else if (!string.IsNullOrEmpty(newTimeStr))
+
+            if (!string.IsNullOrEmpty(newTimeStr))
             {
                 ShowCustomMessageBox("Невірний формат часу.", "Помилка");
             }
@@ -555,7 +590,6 @@ namespace CourseWork
                     }
                 }
                 else { ShowCustomMessageBox("Молоток можна використовувати тільки на вікнах та дверях.", "Інструмент"); }
-                DeselectTool();
             }
             else if (_selectedTool == ToolType.None)
             {
@@ -577,7 +611,6 @@ namespace CourseWork
             if (_selectedTool != ToolType.None && _selectedTool != ToolType.ReloadAll && _selectedTool != ToolType.ReloadFireSystem)
             {
                 ApplyToolToRoom(selectedRoom, _selectedTool);
-                DeselectTool();
             }
             else
             {
@@ -1524,10 +1557,10 @@ namespace CourseWork
         public bool IsDischarging { get; set; } = false;
         public int ActiveDeviceCount { get; set; } = 0;
         
-        // Базова швидкість розрядження + додатково за кожен активний пристрій
-        private const double BASE_DISCHARGE_RATE = 0.3;
-        private const double DISCHARGE_PER_DEVICE = 0.15;
-        private const double CHARGE_RATE_PER_SIM_MINUTE_EQUIVALENT = 1.0 * (6.0 / MainWindow.UPDATE_INTERVAL_SECONDS);
+        // Перехід на пер-хвилинні (симуляційні) ставки для стабільної швидкості
+        private const double CHARGE_PER_MIN = 100.0 / 120.0; // 0→100% за 120 сим-хвилин (2 години)
+        private const double BASE_DISCHARGE_PER_MIN = 0.05;  // базова розрядка, %/сим-хв
+        private const double PER_DEVICE_DISCHARGE_PER_MIN = 0.046; // додатково за кожен активний критичний пристрій, %/сим-хв
         
         private bool _isEffectivelyPowering = false;
         private bool _lastLoggedFullyCharged = false;
@@ -1563,7 +1596,7 @@ namespace CourseWork
                 }
                 
                 double oldCharge = ChargeLevel;
-                ChargeLevel = Math.Min(100.0, ChargeLevel + CHARGE_RATE_PER_SIM_MINUTE_EQUIVALENT * elapsedSimMinutes); 
+                ChargeLevel = Math.Min(100.0, ChargeLevel + CHARGE_PER_MIN * elapsedSimMinutes); 
                 
                 // Логуємо кожні 5% зміни заряду під час зарядки
                 if (Math.Floor(ChargeLevel / 5) > Math.Floor(_lastLoggedChargeLevel / 5))
@@ -1587,8 +1620,8 @@ namespace CourseWork
                 }
                 
                 double oldCharge = ChargeLevel;
-                // Розраховуємо швидкість розрядження на основі кількості активних пристроїв
-                double dischargeRate = (BASE_DISCHARGE_RATE + (ActiveDeviceCount * DISCHARGE_PER_DEVICE)) * (6.0 / MainWindow.UPDATE_INTERVAL_SECONDS);
+                // Розраховуємо швидкість розрядження на основі кількості активних пристроїв (у % за сим-хвилину)
+                double dischargeRate = (BASE_DISCHARGE_PER_MIN + (ActiveDeviceCount * PER_DEVICE_DISCHARGE_PER_MIN));
                 ChargeLevel = Math.Max(0, ChargeLevel - dischargeRate * elapsedSimMinutes); 
                 
                 // Логуємо кожні 5% зміни заряду під час розрядження

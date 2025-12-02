@@ -333,51 +333,41 @@ namespace CourseWork
 
             bool hasSolarPower = _allDevices.OfType<SolarPanelDevice>().Any(p => p.CurrentState == DeviceState.Working);
             var mainBattery = _allDevices.OfType<BatteryDevice>().FirstOrDefault();
+            bool hasPrimaryPower = IsElectricityOn || hasSolarPower;
             bool batteryHasPower = mainBattery != null && mainBattery.ChargeLevel > 0;
-            bool effectivePower = IsElectricityOn || hasSolarPower || (!IsElectricityOn && batteryHasPower);
+            bool batteryPoweringDevices = !hasPrimaryPower && batteryHasPower;
 
-            // Визначаємо, чи батарея має живити критичні пристрої
-            bool batteryPoweringDevices = !IsElectricityOn && !hasSolarPower && batteryHasPower;
-
-            // SET BATTERY STATE BEFORE UPDATING DEVICES
-            // Підраховуємо кількість активних критичних пристроїв, що живляться від батареї
             int activeCriticalDevices = 0;
             if (batteryPoweringDevices)
             {
-                // Камери К1-К5
                 activeCriticalDevices += _allDevices.OfType<CameraDevice>().Count(d => d.CurrentState != DeviceState.Off);
-                // Спринклери ВП1-ВП10
                 activeCriticalDevices += _allDevices.OfType<FireSprinklerDevice>().Count(d => d.CurrentState == DeviceState.Working || d.CurrentState == DeviceState.Active);
-                // Сирена С1
-                activeCriticalDevices += _allDevices.OfType<SirenDevice>().Count(d => d.CurrentState == DeviceState.Active);
-                // Вікна В1-В8 (сенсори)
-                activeCriticalDevices += _allDevices.OfType<WindowDevice>().Count(d => d.CurrentState == DeviceState.Working);
-                // Двері Д1 (сенсори)
-                activeCriticalDevices += _allDevices.OfType<DoorDevice>().Count(d => d.CurrentState == DeviceState.Working);
-                // Термостати Т1-Т3 (сенсори)
-                activeCriticalDevices += _allDevices.OfType<ThermostatDevice>().Count(d => d.CurrentState == DeviceState.Working);
-                // Вентилятори ВЕ1-ВЕ2
-                activeCriticalDevices += _allDevices.OfType<FanDevice>().Count(d => d.CurrentState == DeviceState.Working);
+                activeCriticalDevices += _allDevices.OfType<SirenDevice>().Count(d => d.CurrentState == DeviceState.Active || d.CurrentState == DeviceState.Working);
             }
 
-            // Set battery state BEFORE updating all devices
             if (mainBattery != null)
             {
                 mainBattery.IsDischarging = batteryPoweringDevices;
-                mainBattery.IsCharging = (IsElectricityOn || hasSolarPower) && mainBattery.ChargeLevel < 100.0;
+                mainBattery.IsCharging = hasPrimaryPower && mainBattery.ChargeLevel < 100.0;
                 mainBattery.ActiveDeviceCount = activeCriticalDevices;
             }
 
             foreach (var room in _allRooms)
-                room.UpdateEnvironment(elapsedSimTimePerTick, effectivePower);
+                room.UpdateEnvironment(elapsedSimTimePerTick, hasPrimaryPower);
 
             foreach (var device in _allDevices)
             {
-                // Pass grid power to BatteryDevice to allow correct charge/discharge decisions
-                bool powerFlag = (device is BatteryDevice) ? IsElectricityOn : effectivePower;
+                bool powerFlag = HasPowerForDevice(device, hasPrimaryPower, batteryPoweringDevices);
                 device.UpdateState(CurrentSimTime, powerFlag, device.AssociatedRoom);
                 if (device is StoveDevice stove && stove.CurrentState == DeviceState.Working)
-                    _allDevices.OfType<FanDevice>().FirstOrDefault(f => f.Id == "F002")?.ActivateManual(effectivePower);
+                {
+                    var kitchenFan = _allDevices.OfType<FanDevice>().FirstOrDefault(f => f.Id == "F002");
+                    if (kitchenFan != null)
+                    {
+                        bool fanPower = HasPowerForDevice(kitchenFan, hasPrimaryPower, batteryPoweringDevices);
+                        kitchenFan.ActivateManual(fanPower);
+                    }
+                }
             }
 
             SelectedRoomInfo?.Refresh();
@@ -387,36 +377,42 @@ namespace CourseWork
             bool hasSolarPower = _allDevices.OfType<SolarPanelDevice>().Any(p => p.CurrentState == DeviceState.Working);
             var mainBattery = _allDevices.OfType<BatteryDevice>().FirstOrDefault();
             bool batteryHasPower = mainBattery != null && mainBattery.ChargeLevel > 0;
-            bool batteryPoweringDevices = !IsElectricityOn && !hasSolarPower && batteryHasPower;
+            bool hasPrimaryPower = IsElectricityOn || hasSolarPower;
+            bool batteryPoweringDevices = !hasPrimaryPower && batteryHasPower;
 
-            // Recalculate active critical devices when toggling power
             int activeCriticalDevices = 0;
             if (batteryPoweringDevices)
             {
                 activeCriticalDevices += _allDevices.OfType<CameraDevice>().Count(d => d.CurrentState != DeviceState.Off);
                 activeCriticalDevices += _allDevices.OfType<FireSprinklerDevice>().Count(d => d.CurrentState == DeviceState.Working || d.CurrentState == DeviceState.Active);
-                activeCriticalDevices += _allDevices.OfType<SirenDevice>().Count(d => d.CurrentState == DeviceState.Active);
-                activeCriticalDevices += _allDevices.OfType<WindowDevice>().Count(d => d.CurrentState == DeviceState.Working);
-                activeCriticalDevices += _allDevices.OfType<DoorDevice>().Count(d => d.CurrentState == DeviceState.Working);
-                activeCriticalDevices += _allDevices.OfType<ThermostatDevice>().Count(d => d.CurrentState == DeviceState.Working);
-                activeCriticalDevices += _allDevices.OfType<FanDevice>().Count(d => d.CurrentState == DeviceState.Working);
+                activeCriticalDevices += _allDevices.OfType<SirenDevice>().Count(d => d.CurrentState == DeviceState.Active || d.CurrentState == DeviceState.Working);
             }
 
             if (mainBattery != null)
             {
                 mainBattery.IsDischarging = batteryPoweringDevices;
-                mainBattery.IsCharging = (IsElectricityOn || hasSolarPower) && mainBattery.ChargeLevel < 100.0;
+                mainBattery.IsCharging = hasPrimaryPower && mainBattery.ChargeLevel < 100.0;
                 mainBattery.ActiveDeviceCount = activeCriticalDevices;
             }
 
-            bool effectivePower = IsElectricityOn || hasSolarPower || (!IsElectricityOn && batteryHasPower);
-
             foreach (var device in _allDevices)
             {
-                bool powerFlag = (device is BatteryDevice) ? IsElectricityOn : effectivePower;
+                bool powerFlag = HasPowerForDevice(device, hasPrimaryPower, batteryPoweringDevices);
                 device.UpdateState(CurrentSimTime, powerFlag, device.AssociatedRoom);
             }
             SelectedRoomInfo?.Refresh();
+        }
+
+        private bool HasPowerForDevice(SmartDeviceBase device, bool hasPrimaryPower, bool batteryPoweringCritical)
+        {
+            if (device is StoveDevice) return true; // газова плита працює без електрики
+            if (device is BatteryDevice) return hasPrimaryPower; // заряджається від мережі або сонця
+            if (device is SolarPanelDevice) return true; // працює за власним графіком
+            if (device is CameraDevice || device is FireSprinklerDevice || device is SirenDevice)
+                return hasPrimaryPower || batteryPoweringCritical; // критичні пристрої живляться від батареї
+
+            // Інші пристрої працюють лише за наявності мережі або сонця
+            return hasPrimaryPower;
         }
 
 
@@ -913,6 +909,8 @@ namespace CourseWork
         public int Humidity { get => _currentRoom?.CurrentHumidity ?? 0; set { if (_currentRoom != null) { _currentRoom.CurrentHumidity = value; OnPropertyChanged(); OnPropertyChanged(nameof(HumidityString)); } } }
         public string HumidityString { get => Humidity.ToString("F0", CultureInfo.InvariantCulture); set { if (int.TryParse(value, out int hum)) Humidity = Math.Max(0, Math.Min(100, hum)); OnPropertyChanged(); } }
         public ObservableCollection<DeviceViewModel> DevicesInRoom { get; }
+        public ObservableCollection<DeviceViewModel> ThermostatsInRoom { get; }
+        public bool HasThermostats => ThermostatsInRoom.Count > 0;
         public ICommand DeviceActionCommand { get; }
         public ICommand ToggleFireStatusCommand { get; }
         public ICommand IncreaseTempCommand { get; }
@@ -926,7 +924,7 @@ namespace CourseWork
 
         public SelectedRoomInfoViewModel(MainWindow mainWindow)
         {
-            _mainWindow = mainWindow; DevicesInRoom = new ObservableCollection<DeviceViewModel>(); IsRoomSelected = false;
+            _mainWindow = mainWindow; DevicesInRoom = new ObservableCollection<DeviceViewModel>(); ThermostatsInRoom = new ObservableCollection<DeviceViewModel>(); IsRoomSelected = false;
             DeviceActionCommand = new RelayCommand<DeviceViewModel>(ExecuteDeviceAction);
             ToggleFireStatusCommand = new RelayCommand(() => HasFire = !HasFire, () => CanControlFire);
             IncreaseTempCommand = new RelayCommand(() => Temperature = Math.Min(1000, Temperature + 1));
@@ -967,21 +965,35 @@ namespace CourseWork
             if (_currentRoom != null)
                 foreach (var device in _currentRoom.Devices.OrderBy(d => d.Name))
                     if (_mainWindow.DevicesOnPlan.FirstOrDefault(dvm => dvm.Device == device) is DeviceViewModel vm) DevicesInRoom.Add(vm);
+            UpdateThermostats();
             RefreshProperties();
         }
-        public void ClearSelection() { _currentRoom = null; IsRoomSelected = false; DevicesInRoom.Clear(); RefreshProperties(); }
+        public void ClearSelection() { _currentRoom = null; IsRoomSelected = false; DevicesInRoom.Clear(); ThermostatsInRoom.Clear(); RefreshProperties(); OnPropertyChanged(nameof(HasThermostats)); }
         public void Refresh()
         {
             if (_currentRoom == null || !IsRoomSelected) return;
             RefreshProperties();
             var tempDevices = new List<DeviceViewModel>(DevicesInRoom); DevicesInRoom.Clear();
             foreach (var d in tempDevices.OrderBy(x => x.Name)) DevicesInRoom.Add(d); // Re-add to force UI refresh of list
+            UpdateThermostats();
         }
         private void RefreshProperties()
         {
             OnPropertyChanged(nameof(RoomName)); OnPropertyChanged(nameof(HasFire)); OnPropertyChanged(nameof(FireStatusText));
             OnPropertyChanged(nameof(CanControlFire)); OnPropertyChanged(nameof(BreakInStatusText)); OnPropertyChanged(nameof(Temperature));
             OnPropertyChanged(nameof(TemperatureString)); OnPropertyChanged(nameof(Humidity)); OnPropertyChanged(nameof(HumidityString));
+            OnPropertyChanged(nameof(HasThermostats));
+        }
+        private void UpdateThermostats()
+        {
+            ThermostatsInRoom.Clear();
+            if (_currentRoom == null) return;
+            foreach (var device in _currentRoom.Devices.OfType<ThermostatDevice>().OrderBy(d => d.Name))
+            {
+                var vm = _mainWindow.DevicesOnPlan.FirstOrDefault(dvm => dvm.Device == device);
+                if (vm != null) ThermostatsInRoom.Add(vm);
+            }
+            OnPropertyChanged(nameof(HasThermostats));
         }
         public event PropertyChangedEventHandler PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
@@ -1136,7 +1148,7 @@ namespace CourseWork
             if (!isElectricityOn && CurrentState != DeviceState.Off) { TurnOff(); return; }
             bool canWorkByTime = (Name == "Л1" && (currentTime.Hours >= 16 || currentTime.Hours < 8)) || Name != "Л1";
             if (environment?.HasMotion == true && canWorkByTime && isElectricityOn)
-            { if (CurrentState != DeviceState.Active && CurrentState != DeviceState.Working) { CurrentState = DeviceState.Active; } _activeUntil = currentTime.Add(TimeSpan.FromMinutes(ActivationDurationInSimMinutes)); environment.HasMotion = false; }
+            { if (CurrentState != DeviceState.Active && CurrentState != DeviceState.Working) { CurrentState = DeviceState.Active; } _activeUntil = currentTime.Add(TimeSpan.FromMinutes(ActivationDurationInSimMinutes)); }
             if (CurrentState == DeviceState.Active && currentTime > _activeUntil && !_isManuallyOn) TurnOff();
             if (!canWorkByTime && Name == "Л1" && CurrentState != DeviceState.Off) TurnOff();
         }

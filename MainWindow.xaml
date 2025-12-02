@@ -193,6 +193,46 @@
                                     <Button Content=">" Padding="5,2" Command="{Binding IncreaseHumidityCommand}"/>
                                 </StackPanel>
                             </Grid>
+                            <TextBlock Text="Термостати:" FontWeight="SemiBold" Margin="0,10,0,2" Visibility="{Binding HasThermostats, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                            <ItemsControl ItemsSource="{Binding ThermostatsInRoom}" Visibility="{Binding HasThermostats, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="LightGray" BorderThickness="1" CornerRadius="3" Padding="5" Margin="0,0,0,6">
+                                            <StackPanel>
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Margin="0,0,8,0"/>
+                                                    <TextBlock Text="{Binding CurrentStateDescription}" Margin="0,0,8,0"/>
+                                                    <Button Content="{Binding State, ConverterParameter=Action1, Converter={StaticResource DeviceStateToActionTextConverter}}"
+                                                            Command="{Binding DataContext.DeviceActionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                            CommandParameter="{Binding}"
+                                                            Visibility="{Binding State, ConverterParameter=Action1, Converter={StaticResource DeviceActionToVisibilityConverter}}"
+                                                            Padding="4" Margin="0,0,4,0"/>
+                                                </StackPanel>
+                                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                                    <TextBlock Text="t°:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                                    <Button Content="&lt;" Padding="3,1"
+                                                            Command="{Binding DataContext.DecreaseTargetTempCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                            CommandParameter="{Binding}"/>
+                                                    <TextBox Text="{Binding TargetTemperature, StringFormat=F1, UpdateSourceTrigger=LostFocus}" Width="40" Margin="4,0"
+                                                             VerticalAlignment="Center" HorizontalContentAlignment="Right" PreviewTextInput="NumericOnly_PreviewTextInput"/>
+                                                    <Button Content=">" Padding="3,1"
+                                                            Command="{Binding DataContext.IncreaseTargetTempCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                            CommandParameter="{Binding}"/>
+                                                    <TextBlock Text="   h%:" VerticalAlignment="Center" Margin="8,0,4,0"/>
+                                                    <Button Content="&lt;" Padding="3,1"
+                                                            Command="{Binding DataContext.DecreaseTargetHumidityCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                            CommandParameter="{Binding}"/>
+                                                    <TextBox Text="{Binding TargetHumidity, StringFormat=F0, UpdateSourceTrigger=LostFocus}" Width="40" Margin="4,0"
+                                                             VerticalAlignment="Center" HorizontalContentAlignment="Right" PreviewTextInput="NumericOnly_PreviewTextInput"/>
+                                                    <Button Content=">" Padding="3,1"
+                                                            Command="{Binding DataContext.IncreaseTargetHumidityCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                            CommandParameter="{Binding}"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                             <TextBlock Text="Прилади в приміщенні:" FontWeight="SemiBold" Margin="0,10,0,5"/>
                             <DataGrid ItemsSource="{Binding DevicesInRoom}" AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True" MaxHeight="300">
                                 <DataGrid.Columns>
@@ -207,27 +247,7 @@
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
-                                    <DataGridTemplateColumn Header="Налаштування t°/h%" Width="Auto" Visibility="{Binding IsThermostat, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                        <DataGridTemplateColumn.CellTemplate>
-                                            <DataTemplate>
-                                                <StackPanel Orientation="Vertical">
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <TextBlock Text="t°: " VerticalAlignment="Center"/>
-                                                        <Button Content="&lt;" Padding="3,1" Command="{Binding DataContext.DecreaseTargetTempCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" CommandParameter="{Binding}"/>
-                                                        <TextBox Text="{Binding TargetTemperature, StringFormat=F1, UpdateSourceTrigger=LostFocus}" Width="35" Margin="2,0" VerticalAlignment="Center" HorizontalContentAlignment="Right" PreviewTextInput="NumericOnly_PreviewTextInput"/>
-                                                        <Button Content=">" Padding="3,1" Command="{Binding DataContext.IncreaseTargetTempCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" CommandParameter="{Binding}"/>
-                                                    </StackPanel>
-                                                    <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                                                        <TextBlock Text="h%: " VerticalAlignment="Center"/>
-                                                        <Button Content="&lt;" Padding="3,1" Command="{Binding DataContext.DecreaseTargetHumidityCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" CommandParameter="{Binding}"/>
-                                                        <TextBox Text="{Binding TargetHumidity, StringFormat=F0, UpdateSourceTrigger=LostFocus}" Width="35" Margin="2,0" VerticalAlignment="Center" HorizontalContentAlignment="Right" PreviewTextInput="NumericOnly_PreviewTextInput"/>
-                                                        <Button Content=">" Padding="3,1" Command="{Binding DataContext.IncreaseTargetHumidityCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}" CommandParameter="{Binding}"/>
-                                                    </StackPanel>
-                                                </StackPanel>
-                                            </DataTemplate>
-                                        </DataGridTemplateColumn.CellTemplate>
-                                    </DataGridTemplateColumn>
-                                </DataGrid.Columns>
+                                    </DataGrid.Columns>
                             </DataGrid>
                         </StackPanel>
                         <TextBlock Text="Оберіть кімнату на плані для відображення інформації."  
@@ -256,3 +276,4 @@
         </Grid>
     </Grid>
 </Window>
+

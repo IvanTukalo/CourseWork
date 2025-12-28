@@ -249,7 +249,7 @@ namespace CourseWork
             _allDevices.Add(new CameraDevice("К4", "C004", bedroom2, new Point(17, 500), new Size(cameraSize, cameraSize), this) { DeviceType = DeviceType.Camera, ActivationDurationInSimMinutes = 30 });
             _allDevices.Add(new CameraDevice("К5", "C005", livingRoom, new Point(540, 330), new Size(cameraSize, cameraSize), this) { DeviceType = DeviceType.Camera, ActivationDurationInSimMinutes = 30 });
 
-            _allDevices.Add(new FireSprinklerDevice("ВП1", "FS001", tambour, new Point(96, 35), new Size(fireSprinklerSize, fireSprinklerSize), 0.80, this) { DeviceType = DeviceType.FireSystem });
+            _allDevices.Add(new FireSprinklerDevice("ВП1", "FS001", tambour, new Point(96, 35), new Size(fireSprinklerSize, fireSprinklerSize), 0.40, this) { DeviceType = DeviceType.FireSystem });
             _allDevices.Add(new FireSprinklerDevice("ВП2", "FS002", hall, new Point(99, 335), new Size(fireSprinklerSize, fireSprinklerSize), 0.60, this) { DeviceType = DeviceType.FireSystem });
             _allDevices.Add(new FireSprinklerDevice("ВП3", "FS003", hall, new Point(97, 83), new Size(fireSprinklerSize, fireSprinklerSize), 0.75, this) { DeviceType = DeviceType.FireSystem });
             _allDevices.Add(new FireSprinklerDevice("ВП4", "FS004", bedroom1, new Point(191, 319), new Size(fireSprinklerSize, fireSprinklerSize), 0.50, this) { DeviceType = DeviceType.FireSystem });

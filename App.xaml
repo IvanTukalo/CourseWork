@@ -13,7 +13,7 @@
         <local:BooleanToButtonContentConverter x:Key="ElectricityButtonContentConverter" TrueValue="Вимкнути Електроенергію" FalseValue="Увімкнути Електроенергію"/>
         <local:DeviceStateToActionTextConverter x:Key="DeviceStateToActionTextConverter"/>
         <local:DeviceActionToVisibilityConverter x:Key="DeviceActionToVisibilityConverter"/>
-        <local:BooleanToButtonContentConverter x:Key="PauseButtonContentConverter" TrueValue="Продовжити симуляцію" FalseValue="Пауза"/>
+        <local:BooleanToButtonContentConverter x:Key="PauseButtonContentConverter" TrueValue="Продовжити" FalseValue="Пауза"/>
 
         <!-- Глобальний стиль для кнопок-інструментів -->
         <Style TargetType="Button" x:Key="ToolButtonStyle">
